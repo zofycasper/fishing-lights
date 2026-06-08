@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="北岸钓鱼红绿灯">
+    <meta name="theme-color" content="#111827">
+    <title>北岸钓鱼红绿灯 v3 | North Shore Fishing Lights</title>
+
+    <script src="https://cdn.tailwindcss.com/3.4.1"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+
+    <style>
+        body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .light-card { transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1); }
+        .green { background: linear-gradient(135deg, #10b981, #34d399); }
+        .yellow { background: linear-gradient(135deg, #eab308, #facc15); }
+        .red { background: linear-gradient(135deg, #ef4444, #f87171); }
+        .install-btn {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            z-index: 100; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.3);
+        }
+        .data-warning { background: #451a03; border: 1px solid #92400e; }
+        .gear-badge { font-size: 0.7rem; padding: 1px 8px; border-radius: 9999px; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="max-w-4xl mx-auto p-6">
+        <header class="text-center mb-6">
+            <div class="flex items-center justify-center gap-3 mb-2">
+                <h1 class="text-4xl font-bold">🎣 北岸钓鱼红绿灯 <span class="text-base align-super text-gray-500">v3</span></h1>
+            </div>
+            <p class="text-gray-400">Veritas 2-4kg 微物 + 4-8kg 中铁板 · Auckland North Shore</p>
+
+            <div class="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs">
+                <div class="px-3 py-1 bg-gray-800 rounded-full flex items-center gap-1.5">
+                    <i class="fas fa-map-marker-alt text-emerald-400"></i>
+                    <span id="location-display"></span>
+                </div>
+                <div onclick="showSettingsModal()" class="px-3 py-1 bg-gray-800 hover:bg-gray-700 cursor-pointer rounded-full flex items-center gap-1.5 transition-colors">
+                    <i class="fas fa-cog text-gray-400"></i>
+                    <span>设置</span>
+                </div>
+                <div onclick="showAlgorithmModal()" class="px-3 py-1 bg-gray-800 hover:bg-gray-700 cursor-pointer rounded-full flex items-center gap-1.5 transition-colors">
+                    <i class="fas fa-info-circle text-amber-400"></i>
+                    <span>算法说明</span>
+                </div>
+            </div>
+            <div id="last-update" class="text-sm text-gray-500 mt-2 font-mono"></div>
+        </header>
+
+        <!-- NIWA + Tide Status -->
+        <div class="mb-6">
+            <button onclick="window.open('https://tides.niwa.co.nz/', '_blank')"
+                    class="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-blue-600/90 hover:bg-blue-600 active:bg-blue-700 transition-colors rounded-2xl text-sm font-medium">
+                <i class="fas fa-external-link-alt"></i>
+                <span>打开 NIWA 官方潮汐查询（最准确）</span>
+            </button>
+            <div id="tide-status" class="text-center text-[10px] text-gray-500 mt-1"></div>
+        </div>
+
+        <!-- Today -->
+        <div class="mb-8">
+            <h2 class="text-2xl font-semibold mb-4 flex items-center justify-between">
+                <span class="flex items-center gap-2"><i class="fas fa-calendar-day"></i> 今天 (Today)</span>
+                <button onclick="refreshAll()" class="text-sm px-4 py-1.5 bg-gray-700 hover:bg-gray-600 active:bg-gray-800 rounded-full flex items-center gap-2 transition-colors">
+                    <i class="fas fa-sync-alt"></i> <span>刷新</span>
+                </button>
+            </h2>
+            <div id="today-card" class="light-card rounded-3xl p-8 shadow-inner cursor-pointer active:scale-[0.985] transition-transform" onclick="showDayModal('today')"></div>
+            <div id="today-extra" class="mt-3 px-1 text-xs text-gray-400 flex flex-wrap gap-x-4 gap-y-1"></div>
+        </div>
+
+        <!-- Forecast -->
+        <div>
+            <h2 class="text-2xl font-semibold mb-4 flex items-center gap-2">
+                <i class="fas fa-calendar-alt"></i> 未来5天预报
+            </h2>
+            <div id="forecast-container" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
+        </div>
+
+        <div class="mt-10 text-xs text-gray-500 text-center pb-20 space-y-1">
+            <div>数据：Open-Meteo（天气+海况） + World Tides（潮汐）</div>
+            <div class="text-amber-400/70">仅供参考 • 安全第一 • 请结合现场实际情况判断</div>
+        </div>
+    </div>
+
+    <!-- Install Button -->
+    <button id="install-btn" class="install-btn hidden bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold py-3 px-8 rounded-2xl flex items-center gap-2 text-base shadow-xl">
+        <i class="fas fa-download"></i><span>添加到手机主屏幕</span>
+    </button>
+
+    <!-- Day Detail Modal -->
+    <div id="day-modal" class="hidden fixed inset-0 bg-black/70 flex items-end md:items-center justify-center z-[200]">
+        <div onclick="if (event.target.id === 'day-modal') hideDayModal()" class="absolute inset-0"></div>
+        <div class="relative bg-gray-800 w-full md:w-[440px] md:rounded-3xl rounded-t-3xl p-6 shadow-2xl max-h-[88vh] overflow-auto">
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <div id="modal-date" class="text-xl font-bold"></div>
+                    <div id="modal-subtitle" class="text-sm text-gray-400"></div>
+                </div>
+                <button onclick="hideDayModal()" class="text-3xl text-gray-400 hover:text-white leading-none">×</button>
+            </div>
+
+            <div id="modal-recommend" class="mb-4"></div>
+            <div id="modal-weather" class="mb-5"></div>
+            <div id="modal-tide" class="mb-5"></div>
+
+            <button onclick="window.open('https://tides.niwa.co.nz/', '_blank')"
+                    class="w-full py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-2xl text-sm font-medium flex items-center justify-center gap-2">
+                <i class="fas fa-external-link-alt"></i> <span>打开 NIWA 官方潮汐查询</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Settings Modal (for World Tides Key) -->
+    <div id="settings-modal" onclick="if (event.target.id === 'settings-modal') hideSettingsModal()" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-[300]">
+        <div class="bg-gray-800 rounded-3xl p-6 w-full max-w-md mx-4" onclick="event.stopImmediatePropagation()">
+            <div class="text-xl font-bold mb-4 flex items-center gap-2">
+                <i class="fas fa-cog"></i> 设置
+            </div>
+
+            <div class="space-y-4 text-sm">
+                <div>
+                    <label class="block text-gray-400 mb-1">World Tides API Key（免费）</label>
+                    <input id="worldtides-key" type="text" placeholder="输入你的免费 Key"
+                           class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-emerald-500">
+                    <div class="text-[10px] text-gray-500 mt-1">
+                        去 <a href="https://www.worldtides.info/" target="_blank" class="text-emerald-400 underline">worldtides.info</a> 免费注册获取（每天50次足够个人使用）
+                    </div>
+                </div>
+
+                <div class="pt-2 border-t border-gray-700 text-xs text-gray-400">
+                    没有 Key 也能用天气数据，但潮汐会显示为“需 Key”。
+                </div>
+            </div>
+
+            <div class="flex gap-3 mt-6">
+                <button onclick="saveSettings()" class="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 rounded-2xl font-medium">保存并刷新</button>
+                <button onclick="hideSettingsModal()" class="flex-1 py-2.5 bg-gray-700 hover:bg-gray-600 rounded-2xl">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Algorithm Modal -->
+    <div id="algorithm-modal" onclick="if (event.target.id === 'algorithm-modal') hideAlgorithmModal()" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-[300]">
+        <div class="bg-gray-800 rounded-3xl p-6 w-full max-w-md mx-4 text-sm" onclick="event.stopImmediatePropagation()">
+            <div class="flex justify-between items-center mb-4">
+                <div class="text-xl font-bold">红绿灯算法 v3（你的专属版）</div>
+                <button onclick="hideAlgorithmModal()" class="text-2xl">×</button>
+            </div>
+
+            <div class="space-y-4 text-gray-300">
+                <div>
+                    <div class="font-semibold text-white mb-1">你的两套装备</div>
+                    <div class="text-xs space-y-1">
+                        <div><span class="gear-badge bg-emerald-500/80 text-black">轻套</span> Veritas 2-4kg + Fuego 2000 + PE0.6 → Palms 5-10g 微物铁板</div>
+                        <div><span class="gear-badge bg-yellow-500/80 text-black">中套</span> Veritas 4-8kg + BG 2500 + PE1.0 → Palms 20-30g The Dax / Smelt</div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="font-semibold text-white mb-1">灯的含义（严格按你的要求）</div>
+                    <div class="space-y-1 text-xs">
+                        <div><span class="text-green-400 font-bold">🟢 绿灯</span> = 轻套 + 中套都适合</div>
+                        <div><span class="text-yellow-400 font-bold">🟡 黄灯</span> = 只能用中套（20-30g），轻套不推荐</div>
+                        <div><span class="text-red-400 font-bold">🔴 红灯</span> = 两套都不适合</div>
+                    </div>
+                </div>
+
+                <div class="data-warning p-3 rounded-2xl text-xs">
+                    <strong>主要判断因素（优先级）：</strong><br>
+                    1. 风速 + 阵风（最重要）<br>
+                    2. 风向（北岸东风/东北风通常更差）<br>
+                    3. 潮汐（大潮 + 风逆潮 = 浪大）<br>
+                    4. 降雨概率 + 海浪高度
+                </div>
+
+                <div class="text-[10px] text-gray-400">这个算法是专门为你这两套装备 + 北岸环境写的，未来可以继续优化。</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== CONFIG & GEAR PROFILES ====================
+        const CONFIG = {
+            lat: -36.8,
+            lon: 174.75,
+            locationName: "Auckland North Shore",
+            refreshMinutes: 30,
+            version: "v3.0"
+        };
+
+        // 你的两套装备（核心）
+        const GEAR = {
+            light: {
+                name: "轻套 (2-4kg)",
+                target: "Palms 5-10g 微物铁板",
+                maxComfortWind: 11,     // 低于这个很舒服
+                maxMarginalWind: 15,    // 超过这个轻套不推荐
+                maxGustPenalty: 3
+            },
+            medium: {
+                name: "中套 (4-8kg)",
+                target: "Palms 20-30g The Dax / Smelt",
+                maxComfortWind: 16,
+                maxMarginalWind: 22,
+                maxGustPenalty: 4
+            }
+        };
+
+        // ==================== UTILITIES ====================
+        function getWindDirection(deg) {
+            if (deg == null || isNaN(deg)) return '';
+            const dirs = ["北风","北偏东风","东北风","东偏北风","东风","东偏南风","东南风","南偏东风",
+                          "南风","南偏西风","西南风","西偏南风","西风","西偏北风","西北风","北偏西风"];
+            return dirs[Math.floor((deg + 11.25) / 22.5) % 16];
+        }
+
+        function isOnshoreWind(directionDeg) {
+            // 北岸大致东风/东北风/东南风相对容易起浪（简化版）
+            if (directionDeg == null) return false;
+            return (directionDeg >= 45 && directionDeg <= 135); // 东风系
+        }
+
+        function formatRelativeTime(date) {
+            const diff = Math.floor((Date.now() - date.getTime()) / 1000 / 60);
+            if (diff < 1) return '刚刚';
+            if (diff < 60) return diff + '分钟前';
+            return Math.floor(diff / 60) + '小时前';
+        }
+
+        // ==================== 核心决策引擎（为你定制） ====================
+        function calculateCondition(windKnots, gustKnots, windDir, rainProb, waveHeight, tideInfo) {
+            const light = GEAR.light;
+            const medium = GEAR.medium;
+
+            let lightScore = 100;
+            let mediumScore = 100;
+            const reasons = [];
+
+            // 1. 风速 + 阵风（最重要）
+            const effectiveWindLight = Math.max(windKnots, gustKnots - light.maxGustPenalty);
+            const effectiveWindMedium = Math.max(windKnots, gustKnots - medium.maxGustPenalty);
+
+            if (effectiveWindLight > light.maxMarginalWind) {
+                lightScore -= 60;
+                reasons.push("轻套风太大");
+            } else if (effectiveWindLight > light.maxComfortWind) {
+                lightScore -= 30;
+                reasons.push("轻套风偏大");
+            }
+
+            if (effectiveWindMedium > medium.maxMarginalWind) {
+                mediumScore -= 55;
+                reasons.push("中套风太大");
+            } else if (effectiveWindMedium > medium.maxComfortWind) {
+                mediumScore -= 25;
+                reasons.push("中套风偏大");
+            }
+
+            // 2. 风向惩罚（北岸东风系）
+            if (isOnshoreWind(windDir)) {
+                lightScore -= 18;
+                mediumScore -= 10;
+                reasons.push("东风系（易起浪）");
+            }
+
+            // 3. 降雨
+            if (rainProb > 75) {
+                lightScore -= 15;
+                mediumScore -= 8;
+                reasons.push("降雨概率高");
+            } else if (rainProb > 50) {
+                lightScore -= 8;
+            }
+
+            // 4. 海浪（如果有数据）
+            if (waveHeight && waveHeight > 1.8) {
+                lightScore -= 25;
+                mediumScore -= 15;
+                reasons.push("海浪较大");
+            } else if (waveHeight && waveHeight > 1.2) {
+                lightScore -= 12;
+            }
+
+            // 5. 潮汐影响（最难量化，但很重要）
+            if (tideInfo && tideInfo.range) {
+                if (tideInfo.range > 2.8 && isOnshoreWind(windDir)) {
+                    lightScore -= 20;
+                    mediumScore -= 10;
+                    reasons.push("大潮+东风（浪大）");
+                } else if (tideInfo.range > 2.5) {
+                    lightScore -= 10;
+                }
+            }
+
+            // 最终判断
+            const lightOK = lightScore >= 55;
+            const mediumOK = mediumScore >= 50;
+
+            let overall, label, color;
+
+            if (lightOK) {
+                overall = "green";
+                label = "🟢 绿灯 - 两套都适合";
+                color = "green";
+            } else if (mediumOK) {
+                overall = "yellow";
+                label = "🟡 黄灯 - 推荐中套";
+                color = "yellow";
+            } else {
+                overall = "red";
+                label = "🔴 红灯 - 建议在家保养";
+                color = "red";
+            }
+
+            return {
+                overallColor: color,
+                label,
+                light: {
+                    ok: lightOK,
+                    name: light.name,
+                    score: Math.max(0, lightScore),
+                    target: light.target
+                },
+                medium: {
+                    ok: mediumOK,
+                    name: medium.name,
+                    score: Math.max(0, mediumScore),
+                    target: medium.target
+                },
+                reasons: reasons.length ? reasons.join("，") : "条件尚可"
+            };
+        }
+
+        // ==================== 数据获取 ====================
+        async function fetchWeather() {
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${CONFIG.lat}&longitude=${CONFIG.lon}` +
+                `&current=wind_speed_10m,wind_direction_10m,wind_gusts_10m,weather_code` +
+                `&daily=weather_code,wind_speed_10m_max,wind_direction_10m_dominant,wind_gusts_10m_max,precipitation_probability_max,sunrise,sunset` +
+                `&marine=current,wave_height&timezone=Pacific/Auckland`;
+
+            const res = await fetch(url);
+            if (!res.ok) throw new Error("天气接口失败");
+            const data = await res.json();
+
+            // 缓存
+            localStorage.setItem('fl_last_weather', JSON.stringify({ data, savedAt: Date.now() }));
+            return data;
+        }
+
+        async function fetchTides() {
+            const key = localStorage.getItem('worldtides_key');
+            if (!key) return { error: "NO_KEY" };
+
+            try {
+                const url = `https://www.worldtides.info/api/v3?lat=${CONFIG.lat}&lon=${CONFIG.lon}&key=${key}&days=6&datum=LAT`;
+                const res = await fetch(url);
+                const json = await res.json();
+
+                if (json.status !== 200 || !json.extremes) {
+                    return { error: "API_ERROR" };
+                }
+
+                // 按日期分组
+                const byDay = {};
+                json.extremes.forEach(ext => {
+                    const d = new Date(ext.date).toISOString().slice(0, 10);
+                    if (!byDay[d]) byDay[d] = [];
+                    byDay[d].push({ type: ext.type, height: ext.height, time: new Date(ext.date) });
+                });
+
+                localStorage.setItem('fl_last_tides', JSON.stringify({ data: byDay, savedAt: Date.now() }));
+                return { data: byDay };
+            } catch (e) {
+                return { error: "FETCH_FAILED" };
+            }
+        }
+
+        function loadCachedWeather() {
+            try {
+                const raw = localStorage.getItem('fl_last_weather');
+                if (!raw) return null;
+                const p = JSON.parse(raw);
+                return { data: p.data, savedAt: new Date(p.savedAt) };
+            } catch { return null; }
+        }
+
+        function loadCachedTides() {
+            try {
+                const raw = localStorage.getItem('fl_last_tides');
+                if (!raw) return null;
+                return JSON.parse(raw);
+            } catch { return null; }
+        }
+
+        // ==================== 渲染 ====================
+        function renderToday(weatherData, tideData, condition) {
+            const card = document.getElementById('today-card');
+            const extra = document.getElementById('today-extra');
+
+            if (!weatherData) {
+                card.innerHTML = `<p class="text-red-400 py-8 text-center">数据加载失败</p>`;
+                return;
+            }
+
+            const w = weatherData.current;
+            const daily = weatherData.daily;
+
+            const wind = Math.round(w.wind_speed_10m || 0);
+            const gust = Math.round(w.wind_gusts_10m || 0);
+            const dir = Math.round(w.wind_direction_10m || 0);
+            const dirText = getWindDirection(dir);
+
+            const maxWind = Math.round(daily.wind_speed_10m_max[0]);
+            const maxGust = Math.round(daily.wind_gusts_10m_max[0] || gust);
+            const rain = Math.round(daily.precipitation_probability_max[0] || 0);
+            const wave = weatherData.marine?.current?.[0]?.wave_height ? (weatherData.marine.current[0].wave_height).toFixed(1) : null;
+
+            const html = `
+                <div class="${condition.overallColor} text-black rounded-3xl p-8 shadow-inner">
+                    <div class="text-6xl mb-3">${condition.label}</div>
+                    <div class="text-2xl font-medium">${wind} knots ${dirText}</div>
+                    <div class="mt-5 text-lg">${condition.reasons}</div>
+
+                    <div class="mt-7 text-sm flex justify-between">
+                        <div>推荐：<span class="font-bold">${condition.light.ok ? '轻套 + 中套' : condition.medium.ok ? '中套 (20-30g)' : '暂不推荐出钓'}</span></div>
+                    </div>
+                </div>
+            `;
+            card.innerHTML = html;
+
+            extra.innerHTML = `
+                <div>今日最大风 ${maxWind} knots（阵风 ${maxGust}）</div>
+                ${wave ? `<div>浪高约 ${wave}m</div>` : ''}
+                <div>降雨概率 ${rain}%</div>
+            `;
+        }
+
+        function renderForecast(weatherData, tideData) {
+            const container = document.getElementById('forecast-container');
+            container.innerHTML = '';
+
+            const daily = weatherData.daily;
+
+            for (let i = 0; i < 5; i++) {
+                const date = new Date();
+                date.setDate(date.getDate() + i);
+                const dayStr = date.toISOString().slice(0, 10);
+                const dayName = date.toLocaleDateString('zh-CN', { weekday: 'short' });
+
+                const maxWind = Math.round(daily.wind_speed_10m_max[i]);
+                const maxGust = Math.round(daily.wind_gusts_10m_max?.[i] || maxWind);
+                const rain = Math.round(daily.precipitation_probability_max?.[i] || 0);
+                const dir = daily.wind_direction_10m_dominant ? daily.wind_direction_10m_dominant[i] : null;
+
+                // 简化条件（实际用当天中午数据近似）
+                const cond = calculateCondition(maxWind, maxGust, dir, rain, null, null);
+
+                const card = document.createElement('div');
+                card.className = `light-card rounded-2xl p-5 ${cond.overallColor} text-black cursor-pointer active:scale-[0.985]`;
+                card.innerHTML = `
+                    <div class="font-medium">${dayName} ${date.getDate()}日</div>
+                    <div class="text-4xl my-3">${cond.label.split(' - ')[0]}</div>
+                    <div class="text-sm">${maxWind} knots ${getWindDirection(dir)} · 阵风${maxGust}</div>
+                    <div class="text-xs mt-1 opacity-80">降雨 ${rain}%</div>
+                    <div class="mt-2 text-xs font-medium">${cond.light.ok ? '两套都行' : cond.medium.ok ? '推荐中套' : '不推荐'}</div>
+                `;
+                card.onclick = () => showDayModal('forecast', i, weatherData, tideData);
+                container.appendChild(card);
+            }
+        }
+
+        function updateLastUpdate(savedAt) {
+            const el = document.getElementById('last-update');
+            const t = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+            let html = `更新：${t} NZST`;
+            if (savedAt) html += ` <span class="text-amber-400/70">(${formatRelativeTime(savedAt)} 缓存)</span>`;
+            el.innerHTML = html;
+        }
+
+        // ==================== MODALS ====================
+        function showDayModal(type, index = null, weatherData = null, tideData = null) {
+            const modal = document.getElementById('day-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+
+            const weather = weatherData || window.lastWeatherData;
+            if (!weather) return;
+
+            const daily = weather.daily;
+            const date = new Date();
+            if (index !== null) date.setDate(date.getDate() + index);
+
+            document.getElementById('modal-date').textContent = date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' });
+            document.getElementById('modal-subtitle').textContent = CONFIG.locationName;
+
+            const maxWind = Math.round(daily.wind_speed_10m_max[index || 0]);
+            const maxGust = Math.round(daily.wind_gusts_10m_max?.[index || 0] || maxWind);
+            const rain = Math.round(daily.precipitation_probability_max?.[index || 0] || 0);
+            const dir = daily.wind_direction_10m_dominant?.[index || 0];
+
+            const cond = calculateCondition(maxWind, maxGust, dir, rain, null, null);
+
+            document.getElementById('modal-recommend').innerHTML = `
+                <div class="${cond.overallColor} text-black rounded-2xl p-4 text-center">
+                    <div class="text-2xl font-bold">${cond.label}</div>
+                    <div class="mt-1 text-sm">${cond.reasons}</div>
+                </div>
+            `;
+
+            // 潮汐部分（如果有数据）
+            const tideHtml = getTideHtmlForDay(tideData, index);
+            document.getElementById('modal-tide').innerHTML = tideHtml || `<div class="text-gray-400 text-sm">潮汐数据需 World Tides Key</div>`;
+
+            document.getElementById('modal-weather').innerHTML = `
+                <div class="bg-gray-700/70 rounded-2xl p-4">
+                    <div class="flex justify-between">
+                        <div>最大风速</div><div class="font-mono">${maxWind} knots</div>
+                    </div>
+                    <div class="flex justify-between mt-1">
+                        <div>阵风</div><div class="font-mono">${maxGust} knots</div>
+                    </div>
+                    <div class="flex justify-between mt-1">
+                        <div>降雨概率</div><div>${rain}%</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function getTideHtmlForDay(tideData, index) {
+            if (!tideData || !tideData.data) return null;
+            const date = new Date();
+            date.setDate(date.getDate() + (index || 0));
+            const key = date.toISOString().slice(0, 10);
+            const extremes = tideData.data[key];
+            if (!extremes) return null;
+
+            let html = `<div class="text-sm"><div class="text-gray-400 mb-1">潮汐参考</div>`;
+            extremes.slice(0, 4).forEach(e => {
+                const t = e.time.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+                html += `<div class="flex justify-between py-0.5"><span>${e.type === 'High' ? '高潮' : '低潮'}</span><span class="font-mono">${e.height.toFixed(2)}m ${t}</span></div>`;
+            });
+            html += `</div>`;
+            return html;
+        }
+
+        function hideDayModal() {
+            const m = document.getElementById('day-modal');
+            m.classList.remove('flex');
+            m.classList.add('hidden');
+        }
+
+        function showSettingsModal() {
+            const modal = document.getElementById('settings-modal');
+            document.getElementById('worldtides-key').value = localStorage.getItem('worldtides_key') || '';
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function hideSettingsModal() {
+            const m = document.getElementById('settings-modal');
+            m.classList.remove('flex');
+            m.classList.add('hidden');
+        }
+
+        function saveSettings() {
+            const key = document.getElementById('worldtides-key').value.trim();
+            if (key) {
+                localStorage.setItem('worldtides_key', key);
+            } else {
+                localStorage.removeItem('worldtides_key');
+            }
+            hideSettingsModal();
+            refreshAll(true);
+        }
+
+        function showAlgorithmModal() {
+            document.getElementById('algorithm-modal').classList.remove('hidden');
+            document.getElementById('algorithm-modal').classList.add('flex');
+        }
+        function hideAlgorithmModal() {
+            const m = document.getElementById('algorithm-modal');
+            m.classList.remove('flex'); m.classList.add('hidden');
+        }
+
+        // ==================== 主流程 ====================
+        async function refreshAll(forceFresh = false) {
+            const todayCard = document.getElementById('today-card');
+            todayCard.innerHTML = `<div class="py-10 text-center"><i class="fas fa-sync-alt fa-spin text-3xl text-emerald-400"></i><div class="mt-3 text-gray-400">正在更新数据...</div></div>`;
+
+            let weather = null;
+            let tides = null;
+
+            // 天气
+            try {
+                weather = await fetchWeather();
+            } catch (e) {
+                const cached = loadCachedWeather();
+                if (cached) weather = cached.data;
+            }
+
+            // 潮汐
+            const tideResult = await fetchTides();
+            if (tideResult.data) {
+                tides = tideResult;
+                document.getElementById('tide-status').innerHTML = `潮汐数据已更新`;
+            } else if (tideResult.error === "NO_KEY") {
+                const cachedTide = loadCachedTides();
+                if (cachedTide) tides = cachedTide;
+                document.getElementById('tide-status').innerHTML = `潮汐需免费 World Tides Key（设置里可填）`;
+            } else {
+                document.getElementById('tide-status').innerHTML = `潮汐获取失败`;
+            }
+
+            if (!weather) {
+                todayCard.innerHTML = `<p class="text-red-400 py-8 text-center">无法获取数据，请检查网络</p>`;
+                return;
+            }
+
+            window.lastWeatherData = weather;
+
+            // 计算今天条件（简化用当天最大风）
+            const todayWind = Math.round(weather.daily.wind_speed_10m_max[0]);
+            const todayGust = Math.round(weather.daily.wind_gusts_10m_max[0] || todayWind);
+            const todayDir = weather.daily.wind_direction_10m_dominant[0];
+            const todayRain = Math.round(weather.daily.precipitation_probability_max[0] || 0);
+
+            const todayCond = calculateCondition(todayWind, todayGust, todayDir, todayRain, null, tides?.data ? { range: 2.6 } : null);
+
+            renderToday(weather, tides, todayCond);
+            renderForecast(weather, tides);
+
+            const cached = loadCachedWeather();
+            updateLastUpdate(cached ? cached.savedAt : null);
+        }
+
+        // PWA 安装逻辑（保持简洁）
+        let deferredPrompt;
+        const installBtn = document.getElementById('install-btn');
+        window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredPrompt = e; installBtn.classList.remove('hidden'); installBtn.classList.add('flex'); });
+        installBtn.addEventListener('click', async () => {
+            if (!deferredPrompt) return;
+            deferredPrompt.prompt();
+            await deferredPrompt.userChoice;
+            deferredPrompt = null;
+            installBtn.classList.add('hidden');
+        });
+
+        // 初始化
+        function init() {
+            document.getElementById('location-display').textContent = `${CONFIG.locationName} (${CONFIG.lat}, ${CONFIG.lon})`;
+
+            // 尝试用缓存快速显示
+            const cachedW = loadCachedWeather();
+            const cachedT = loadCachedTides();
+
+            if (cachedW) {
+                window.lastWeatherData = cachedW.data;
+                const todayWind = Math.round(cachedW.data.daily.wind_speed_10m_max[0]);
+                const todayGust = Math.round(cachedW.data.daily.wind_gusts_10m_max?.[0] || todayWind);
+                const cond = calculateCondition(todayWind, todayGust, cachedW.data.daily.wind_direction_10m_dominant[0], 0, null, null);
+                renderToday(cachedW.data, cachedT, cond);
+                renderForecast(cachedW.data, cachedT);
+                updateLastUpdate(cachedW.savedAt);
+            }
+
+            // 后台刷新真实数据
+            refreshAll();
+            setInterval(() => refreshAll(), CONFIG.refreshMinutes * 60 * 1000);
+        }
+
+        init();
+    </script>
+</body>
+</html>

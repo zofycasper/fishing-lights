@@ -1,0 +1,8 @@
+[build]
+  publish = "."
+  # functions directory (Netlify will auto-detect netlify/functions too)
+  functions = "netlify/functions"
+
+[functions]
+  # Optional: node bundler settings if needed later
+  node_bundler = "esbuild"

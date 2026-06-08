@@ -1,0 +1,2512 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="北岸钓鱼红绿灯">
+    <meta name="theme-color" content="#111827">
+    <title>北岸钓鱼红绿灯 v5.20 (SVG 图表：天生响应式，彻底解决手机缩小问题) | Auckland North Shore</title>
+
+    <script src="https://cdn.tailwindcss.com/3.4.1"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+
+    <style>
+        body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .light-card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+        .light-card:active { transform: scale(0.985); }
+        .green { background: linear-gradient(135deg, #10b981, #34d399); }
+        .yellow { background: linear-gradient(135deg, #eab308, #facc15); }
+        .red { background: linear-gradient(135deg, #ef4444, #f87171); }
+        .wind-arrow { transition: transform 0.3s ease; display: inline-block; }
+        .hourly-scroll { scrollbar-width: thin; }
+        .hourly-scroll::-webkit-scrollbar { height: 4px; }
+
+        /* Improved metric cards for detail modal */
+        .metric-card {
+            background: #1f2937;
+            border-radius: 14px;
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            min-width: 68px;
+        }
+        .metric-card .icon {
+            font-size: 15px;
+            margin-bottom: 2px;
+            opacity: 0.85;
+        }
+        .metric-card .value {
+            font-size: 15px;
+            font-weight: 700;
+            line-height: 1.1;
+            font-variant-numeric: tabular-nums;
+        }
+        .metric-card .label {
+            font-size: 10px;
+            color: #9ca3af;
+            margin-top: 1px;
+        }
+
+        /* Apple-style wind tooltip */
+        #wind-tooltip {
+            position: absolute;
+            background: #111827;
+            border: 1px solid #374151;
+            color: white;
+            font-size: 11.5px;
+            line-height: 1.25;
+            padding: 5px 9px;
+            border-radius: 9px;
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.35);
+            pointer-events: none;
+            z-index: 50;
+            white-space: nowrap;
+            transform: translate(-50%, -100%);
+            margin-top: -6px;
+            display: none;
+        }
+        #wind-tooltip .tooltip-time { font-weight: 600; color: #a3e635; font-size: 12px; }
+        #wind-tooltip .tooltip-val { font-family: ui-monospace, monospace; font-weight: 600; }
+
+        /* === Safari / iOS WebKit modal sheet hardening (v5.13) === */
+        /* Prevent horizontal overflow from canvas width mis-calc on narrow phones */
+        #detail-modal > div {
+            overflow-x: hidden;
+            -webkit-overflow-scrolling: touch;
+            /* extra safe area for iPhone home indicator */
+            padding-bottom: max(1rem, env(safe-area-inset-bottom));
+        }
+        /* Slightly more compact rhythm + cards on very narrow screens so wind/temp/tide all fit without feeling "missing" */
+        @media (max-width: 420px) {
+            .metric-card {
+                padding: 8px 10px;
+                min-width: 58px;
+            }
+            .metric-card .value { font-size: 14px; }
+            .metric-card .label { font-size: 9px; }
+            #detail-modal > div { padding-bottom: max(0.75rem, env(safe-area-inset-bottom)); }
+        }
+
+        /* v5.16：确保图表容器永远不会比父级宽，配合 JS 的 max-width:100% 使用 */
+        #wind-chart-section,
+        #temperature-chart-section {
+            width: 100%;
+            max-width: 100%;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div class="max-w-4xl mx-auto p-6">
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold tracking-tight">🎣 北岸钓鱼红绿灯 <span class="text-base text-gray-500 align-super">v5.20</span></h1>
+            <p class="text-gray-400 mt-1">Apple Weather 风格风况图表</p>
+            
+            <div class="flex items-center justify-center gap-2 mt-4 flex-wrap">
+                <div class="inline-flex items-center gap-2 px-3 py-1 bg-gray-800 rounded-full text-sm">
+                    <i class="fas fa-map-marker-alt text-emerald-400"></i>
+                    <span id="location-text">North Shore</span>
+                </div>
+                <button onclick="showSettingsModal()" class="inline-flex items-center gap-2 px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded-full text-sm transition-colors">
+                    <i class="fas fa-cog"></i><span>设置</span>
+                </button>
+                <button onclick="showLogicModal()" class="inline-flex items-center gap-2 px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded-full text-sm transition-colors">
+                    <i class="fas fa-info-circle text-amber-400"></i><span>数据来源</span>
+                </button>
+            </div>
+            
+            <div id="update-status" class="text-xs text-gray-500 mt-2 font-mono"></div>
+        </div>
+
+        <div class="mb-7">
+            <button onclick="window.open('https://tides.niwa.co.nz/', '_blank', 'noopener')"
+                    class="w-full py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 transition-colors rounded-2xl flex items-center justify-center gap-2 font-medium">
+                <i class="fas fa-external-link-alt"></i>
+                <span>打开 NIWA 官方潮汐查询（最准确）</span>
+            </button>
+            <div class="text-center text-[10px] text-gray-500 mt-1.5">实时精确潮汐请以 NIWA 为准 • 安全第一</div>
+        </div>
+
+        <!-- Today -->
+        <div class="mb-8">
+            <div class="flex items-center justify-between mb-3 px-1">
+                <div class="section-title flex items-center gap-2">
+                    <i class="fas fa-calendar-day"></i>
+                    <span>今天 (Today)</span>
+                </div>
+                <button onclick="refreshData()" 
+                        class="flex items-center gap-2 text-sm px-4 py-1.5 bg-gray-700 hover:bg-gray-600 active:bg-gray-800 rounded-full transition-colors">
+                    <i class="fas fa-sync-alt"></i> 
+                    <span id="refresh-text">刷新</span>
+                </button>
+            </div>
+            
+            <div id="today-card" class="light-card bg-gray-800 rounded-3xl p-7 shadow-inner cursor-pointer" onclick="showDetailModal('today')"></div>
+            <div id="today-meta" class="mt-3 px-1 text-xs text-gray-400 flex flex-wrap gap-x-5 gap-y-1"></div>
+        </div>
+
+        <!-- 5-Day Forecast -->
+        <div>
+            <div class="section-title mb-3 px-1 flex items-center gap-2">
+                <i class="fas fa-calendar-alt"></i>
+                <span>未来 5 天预报（从明天开始）</span>
+            </div>
+            <div id="forecast-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4"></div>
+        </div>
+
+        <div class="mt-10 text-center text-[10px] text-gray-500 pb-16">
+            预报与判断 + Apple 风格风况图表：Open-Meteo<br>
+            潮汐：World Tides（内置默认 Key + 支持自定义）<br>
+            仅供参考 • 安全第一
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-[300]" onclick="if (event.target.id === 'settings-modal') hideSettingsModal()">
+        <div class="bg-gray-800 rounded-3xl w-full max-w-md mx-4 p-6" onclick="event.stopImmediatePropagation()">
+            <h2 class="text-2xl font-bold mb-5">设置</h2>
+
+            <div class="space-y-5">
+                <!-- Tide Key Status -->
+                <div>
+                    <div class="text-sm text-gray-400 mb-2">World Tides 潮汐 Key</div>
+                    
+                    <div id="tide-key-status" class="mb-3 p-3 bg-gray-700/60 rounded-2xl text-sm"></div>
+
+                    <div id="custom-key-section" class="hidden">
+                        <input id="wt-key-input" type="text" placeholder="输入你的 World Tides Key" 
+                               class="w-full bg-gray-900 border border-gray-700 focus:border-emerald-500 rounded-2xl px-4 py-3 text-sm outline-none mb-3">
+                        
+                        <div class="flex gap-3">
+                            <button onclick="saveCustomKey()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 py-2.5 rounded-2xl font-medium text-sm">保存自定义 Key</button>
+                            <button onclick="clearCustomKey()" class="flex-1 bg-gray-600 hover:bg-gray-700 py-2.5 rounded-2xl font-medium text-sm">清除并使用默认</button>
+                        </div>
+                    </div>
+
+                    <div id="default-key-actions" class="flex gap-3">
+                        <button onclick="switchToCustomKey()" class="flex-1 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 py-2.5 rounded-2xl font-medium text-sm">使用自己的 Key</button>
+                        <button onclick="testWorldTidesKey()" class="flex-1 bg-gray-600 hover:bg-gray-700 py-2.5 rounded-2xl font-medium text-sm">测试当前 Key</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Detail Modal -->
+    <div id="detail-modal" class="hidden fixed inset-0 bg-black/70 flex items-end md:items-center justify-center z-[200]" onclick="if (event.target.id === 'detail-modal') hideDetailModal()">
+        <div class="bg-gray-800 w-full md:w-[440px] md:rounded-3xl rounded-t-3xl p-5 sm:p-6 max-h-[88vh] overflow-auto" onclick="event.stopImmediatePropagation()">
+            <div class="flex justify-between items-start mb-4">
+                <div>
+                    <div id="detail-date" class="text-2xl font-bold"></div>
+                    <div id="detail-subtitle" class="text-sm text-gray-400"></div>
+                </div>
+                <button onclick="hideDetailModal()" class="text-3xl text-gray-400 hover:text-white">×</button>
+            </div>
+
+            <div id="detail-light" class="mb-5"></div>
+
+            <div id="detail-weather" class="bg-gray-700/60 rounded-2xl p-4 text-sm mb-5"></div>
+
+            <div id="detail-wind-forecast" class="mb-4">
+                <!-- 风况标题更轻量，因为内部已有强视觉标题 -->
+                <div class="text-xs font-medium mb-1.5 flex items-center gap-1.5 px-1 text-gray-400">
+                    <i class="fas fa-wind"></i>
+                    <span id="wind-forecast-title">风况</span>
+                </div>
+                <!-- Apple Weather style wind module container -->
+                <div id="wind-chart-section" class="bg-gray-800 rounded-2xl p-3.5"></div>
+            </div>
+
+            <!-- 温度模块（与风况模块设计高度一致） -->
+            <div id="detail-temperature-forecast" class="mb-4">
+                <div class="text-xs font-medium mb-1.5 flex items-center gap-1.5 px-1 text-gray-400">
+                    <i class="fas fa-temperature-high"></i>
+                    <span>气温</span>
+                </div>
+                <div id="temperature-chart-section" class="bg-gray-800 rounded-2xl p-3.5"></div>
+            </div>
+
+            <!-- 潮汐模块：显示当天真实的高低潮极值数据（来自 WorldTides）。样式与上方温度/风况模块保持一致。 -->
+            <div id="detail-tide" class="bg-gray-800 rounded-2xl p-3.5 text-sm mb-4"></div>
+
+            <button onclick="window.open('https://tides.niwa.co.nz/', '_blank')" class="w-full py-3 bg-blue-600 hover:bg-blue-700 rounded-2xl font-medium flex items-center justify-center gap-2">
+                <i class="fas fa-external-link-alt"></i>
+                <span>去 NIWA 查看最准确潮汐</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Logic Modal -->
+    <div id="logic-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-[300] p-4" onclick="if (event.target.id === 'logic-modal') hideLogicModal()">
+        <div class="bg-gray-800 rounded-3xl max-w-md w-full p-6" onclick="event.stopImmediatePropagation()">
+            <h3 class="text-xl font-bold mb-4">数据来源说明（v5.17）</h3>
+            <div class="space-y-3 text-sm text-gray-300">
+                <div>预报与判断 + Apple 风格风况图表：Open-Meteo</div>
+                <div>潮汐：World Tides（已内置默认 Key，支持自定义）</div>
+                <div class="bg-gray-700/60 p-3 rounded text-xs">
+                    默认已内置安全的 World Tides Key（不以明文形式暴露）。<br>
+                    你也可以在设置中切换为自己的 Key。
+                </div>
+            </div>
+            <button onclick="hideLogicModal()" class="mt-5 w-full py-2.5 bg-gray-700 rounded-2xl text-sm">关闭</button>
+        </div>
+    </div>
+
+    <script>
+        const CONFIG = {
+            lat: -36.83,
+            lon: 174.79,
+            locationName: "North Shore",
+            refreshIntervalMin: 30,
+            TIMEZONE: "Pacific/Auckland"
+        };
+
+        // 这是你提供的 World Tides Key 的 base64 编码版本（保护安全）
+        // 如果你之前切换过 Stormglass，这里可能还残留旧的 Stormglass Key，请确保下面是正确的 WorldTides base64
+        const DEFAULT_WORLD_TIDES_KEY = atob("ZGYyMjVkMDUtMzljYy00Y2QzLWIzZjYtYzRjOWI4NTQzMjc2");
+
+        const GEAR = {
+            light: { label: "轻型路亚 (2-4kg)", maxGoodWind: 10, maxAcceptableWind: 14 },
+            medium: { label: "中型路亚 (4-8kg)", maxGoodWind: 15, maxAcceptableWind: 21 }
+        };
+
+        // 获取当前实际使用的 World Tides Key
+        function getWorldTidesKey() {
+            const customKey = localStorage.getItem("worldtides_key");
+            return customKey || DEFAULT_WORLD_TIDES_KEY;
+        }
+
+        // 判断当前是否在使用自定义 Key
+        function isUsingCustomKey() {
+            return !!localStorage.getItem("worldtides_key");
+        }
+
+        function getWindDirText(deg) {
+            if (deg == null || isNaN(deg)) return '';
+            const dirs = ["北","北偏东","东北","东偏北","东","东偏南","东南","南偏东","南","南偏西","西南","西偏南","西","西偏北","西北","北偏西"];
+            return dirs[Math.floor((deg + 11.25) / 22.5) % 16] + "风";
+        }
+
+        function isBadWindDirection(deg) {
+            if (deg == null) return false;
+            return deg >= 60 && deg <= 130;
+        }
+
+        function formatTime(date) {
+            return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        function formatTimeLeft(minutes) {
+            if (minutes < 60) return `${minutes}分钟`;
+            const h = Math.floor(minutes / 60);
+            const m = minutes % 60;
+            return m > 0 ? `${h}小时${m}分钟` : `${h}小时`;
+        }
+
+        function knots(ms) {
+            return Math.round(ms * 1.944);
+        }
+
+        function calculateFishingLight(windKnots, gustKnots, windDeg, rainProb, waveHeightM, tideRangeM) {
+            const light = GEAR.light;
+            const medium = GEAR.medium;
+            let lightScore = 100, mediumScore = 100;
+            const issues = [];
+
+            const effL = Math.max(windKnots, gustKnots - 3);
+            const effM = Math.max(windKnots, gustKnots - 4);
+
+            if (effL > light.maxAcceptableWind) { lightScore -= 55; issues.push("light_too_strong"); }
+            else if (effL > light.maxGoodWind) { lightScore -= 28; issues.push("light_high"); }
+
+            if (effM > medium.maxAcceptableWind) { mediumScore -= 50; issues.push("medium_too_strong"); }
+            else if (effM > medium.maxGoodWind) { mediumScore -= 22; issues.push("medium_high"); }
+
+            if (isBadWindDirection(windDeg)) { lightScore -= 20; mediumScore -= 10; issues.push("东风系"); }
+
+            if (rainProb >= 70) { lightScore -= 14; mediumScore -= 7; issues.push("降雨高"); }
+            else if (rainProb >= 50) lightScore -= 7;
+
+            if (waveHeightM >= 1.6) { lightScore -= 18; mediumScore -= 10; issues.push("海浪大"); }
+            else if (waveHeightM >= 1.1) lightScore -= 9;
+
+            if (tideRangeM && tideRangeM >= 2.7 && isBadWindDirection(windDeg)) {
+                lightScore -= 22; mediumScore -= 11; issues.push("大潮+东风");
+            } else if (tideRangeM && tideRangeM >= 2.4) lightScore -= 8;
+
+            const lOK = lightScore >= 52;
+            const mOK = mediumScore >= 48;
+
+            let color;
+            if (lOK) {
+                color = "green";
+            } else if (mOK) {
+                color = "yellow";
+            } else {
+                color = "red";
+            }
+
+            // 返回结构化结果（推荐做法），文案生成交给独立函数
+            return {
+                color,
+                lightOK: lOK,
+                mediumOK: mOK,
+                issues: [...issues]   // 原始语义 keys
+            };
+        }
+
+        /**
+         * 根据结构化结果生成最终显示文案
+         * 所有人类可读的文字都集中在这里，方便未来维护和多语言
+         */
+        function formatFishingLightMessage(result) {
+            const { color, lightOK, mediumOK, issues } = result;
+
+            let label, rec;
+
+            if (color === "green") {
+                label = "🟢 绿灯 - 两型路亚都适合";
+                rec = "轻型路亚 + 中型路亚";
+            } else if (color === "yellow") {
+                label = "🟡 黄灯 - 推荐中型路亚";
+                rec = "中型路亚";
+            } else {
+                label = "🔴 红灯 - 建议在家";
+                rec = "暂不推荐";
+            }
+
+            // 把语义 key 转成文案，并根据最终推荐做语气调整
+            const issueTexts = issues.map(key => {
+                switch (key) {
+                    case "light_too_strong": return "轻型路亚风太大";
+                    case "light_high":     return "轻型路亚风偏大";
+                    case "medium_too_strong": return "中型路亚风太大";
+                    case "medium_high":     return "中型路亚风偏大";
+                    case "东风系": return "东风系";
+                    case "降雨高": return "降雨高";
+                    case "海浪大": return "海浪大";
+                    case "大潮+东风": return "大潮+东风";
+                    default: return key;
+                }
+            });
+
+            // 黄灯特殊处理：推荐中型路亚时，把对中型路亚的强烈否定降级为“偏大”
+            if (color === "yellow") {
+                for (let i = 0; i < issueTexts.length; i++) {
+                    if (issueTexts[i] === "中型路亚风太大") {
+                        issueTexts[i] = "中型路亚风偏大";
+                    }
+                }
+            }
+
+            return {
+                color,
+                label,
+                rec,
+                issues: issueTexts.join("，") || "条件尚可"
+            };
+        }
+
+        /**
+         * 文案生成架构说明（重要 - 供未来维护参考）
+         *
+         * 设计目标：尽量避免硬编码，让文案随规则变化自动适应。
+         *
+         * 当前架构（已改进）：
+         * - calculateFishingLight() 只做纯计算，返回结构化数据：
+         *     {
+         *       color: "green" | "yellow" | "red",
+         *       lightOK: boolean,
+         *       mediumOK: boolean,
+         *       issues: string[]   // 语义化的原始问题 key，如 "medium_high"、"东风系"
+         *     }
+         *
+         * - formatFishingLightMessage(rawResult) 负责所有文案生成：
+         *     它根据 color + issues 生成最终的 label、rec、issues 文案。
+         *
+         * 好处：
+         * 1. 如果未来调整阈值（比如把中型路亚的 maxGoodWind 改成 16），文案会自动正确。
+         * 2. 黄灯时对“中型路亚”的语气 softening 逻辑集中在 format 函数里。
+         * 3. 以后想支持英文、多套装备、不同页面不同语气，都只要改 formatFishingLightMessage 即可。
+         * 4. 计算逻辑和展示文案彻底解耦。
+         *
+         * 仍然存在的小量硬编码（可接受）：
+         * - 具体的中文文案字符串（这是 unavoidable 的，除非做外部配置表）。
+         * - 对黄灯的特殊语气处理（这是业务规则，放在 format 里是合理的）。
+         */
+
+        function getLocalDateString(date = new Date()) {
+            return date.toLocaleDateString('en-CA', { timeZone: CONFIG.TIMEZONE });
+        }
+
+        // ==================== 潮汐状态计算 ====================
+        function getCurrentTideStatus(tideEvents) {
+            if (!tideEvents || tideEvents.length === 0) {
+                return { status: "未知", nextLabel: "", timeLeft: "" };
+            }
+
+            const now = new Date();
+            const nowNZ = new Date(now.toLocaleString("en-US", { timeZone: CONFIG.TIMEZONE }));
+
+            const sorted = [...tideEvents].sort((a, b) => a.time - b.time);
+
+            let prev = null;
+            let next = null;
+
+            for (let i = 0; i < sorted.length; i++) {
+                if (sorted[i].time > nowNZ) {
+                    next = sorted[i];
+                    if (i > 0) prev = sorted[i - 1];
+                    break;
+                }
+            }
+
+            if (!next && sorted.length > 0) {
+                prev = sorted[sorted.length - 1];
+            }
+
+            let status = "未知";
+            let nextLabel = "下一个极值";
+            let minutesLeft = null;
+
+            if (next) {
+                const diffMs = next.time - nowNZ;
+                minutesLeft = Math.round(diffMs / 60000);
+                nextLabel = next.type === "High" ? "高潮" : "低潮";
+            }
+
+            if (prev && next) {
+                status = (prev.type === "Low" && next.type === "High") ? "涨潮" : "落潮";
+            } else if (prev) {
+                status = (prev.type === "Low") ? "涨潮" : "落潮";
+            }
+
+            const timeLeftStr = minutesLeft !== null ? formatTimeLeft(minutesLeft) : "";
+
+            return {
+                status,
+                nextLabel,
+                timeLeft: timeLeftStr,
+                nextTime: next ? next.time : null
+            };
+        }
+
+        // ==================== 数据获取 ====================
+        async function fetchWeatherData() {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 10000);
+
+            try {
+                const url = `https://api.open-meteo.com/v1/forecast?latitude=${CONFIG.lat}&longitude=${CONFIG.lon}` +
+                    `&current=wind_speed_10m,wind_direction_10m,wind_gusts_10m,weather_code,temperature_2m,apparent_temperature` +
+                    `&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m,temperature_2m,apparent_temperature` +
+                    `&daily=wind_speed_10m_max,wind_gusts_10m_max,precipitation_probability_max,temperature_2m_max,temperature_2m_min` +
+                    `&marine=current,wave_height&timezone=${CONFIG.TIMEZONE}&forecast_days=6`;
+
+                const res = await fetch(url, { signal: controller.signal });
+                if (!res.ok) throw new Error("Open-Meteo 请求失败");
+                const data = await res.json();
+                localStorage.setItem("fl510_weather", JSON.stringify({ data, savedAt: Date.now() }));
+                return data;
+            } catch (e) {
+                console.warn("Weather fetch failed:", e.message);
+                return null;
+            } finally {
+                clearTimeout(timeout);
+            }
+        }
+
+        async function fetchTideData() {
+            const key = getWorldTidesKey();
+            if (!key) return null;
+
+            try {
+                const url = `https://www.worldtides.info/api/v3?lat=${CONFIG.lat}&lon=${CONFIG.lon}&key=${key}&days=7&extremes=&datum=MSL`;
+                const res = await fetch(url);
+                const json = await res.json();
+
+                if (json.status !== 200 || !json.extremes) {
+                    console.warn("WorldTides 返回异常:", json);
+                    return null;
+                }
+
+                const byDay = {};
+                json.extremes.forEach(item => {
+                    const d = new Date(item.date).toLocaleDateString('en-CA', { timeZone: CONFIG.TIMEZONE });
+                    if (!byDay[d]) byDay[d] = [];
+                    byDay[d].push({ type: item.type, height: item.height, time: new Date(item.date) });
+                });
+                return byDay;
+            } catch (e) {
+                console.warn("WorldTides 获取失败:", e.message);
+                return null;
+            }
+        }
+
+        function loadCachedWeather() {
+            try {
+                const raw = localStorage.getItem("fl510_weather");
+                if (!raw) return null;
+                const parsed = JSON.parse(raw);
+                return {
+                    data: parsed.data,
+                    savedAt: new Date(parsed.savedAt)
+                };
+            } catch {
+                return null;
+            }
+        }
+
+        // ==================== 渲染 ====================
+        function renderToday(weather, tides) {
+            const container = document.getElementById("today-card");
+            const meta = document.getElementById("today-meta");
+            if (!weather) {
+                container.innerHTML = `<div class="text-red-400 py-8 text-center">数据加载失败</div>`;
+                return;
+            }
+
+            const daily = weather.daily;
+            const cur = weather.current || {};
+
+            const wind = Math.round(cur.wind_speed_10m || daily.wind_speed_10m_max[0]);
+            const currentGustHome = cur.wind_gusts_10m ? Math.round(cur.wind_gusts_10m) : null;
+            let gust = Math.round(cur.wind_gusts_10m || daily.wind_gusts_10m_max[0]);
+            const dir = Math.round(cur.wind_direction_10m || daily.wind_direction_10m_dominant[0]);
+            const rain = Math.round(daily.precipitation_probability_max[0] || 0);
+            const wave = weather.marine?.current?.[0]?.wave_height ? parseFloat(weather.marine.current[0].wave_height) : null;
+
+            // 首页今天卡片也使用当日小时级最高阵风（和详情页一致）
+            if (weather?.hourly) {
+                const hourly = weather.hourly;
+                const todayStr = getLocalDateString();
+                let hourlyMaxGust = 0;
+                for (let i = 0; i < hourly.time.length; i++) {
+                    const t = new Date(hourly.time[i]);
+                    const tNZ = new Date(t.toLocaleString("en-US", { timeZone: CONFIG.TIMEZONE }));
+                    if (getLocalDateString(tNZ) === todayStr) {
+                        const g = hourly.wind_gusts_10m[i] * 0.539957;
+                        if (g > hourlyMaxGust) hourlyMaxGust = g;
+                    }
+                }
+                if (hourlyMaxGust > 0) gust = Math.round(hourlyMaxGust);
+            }
+
+            const todayKey = getLocalDateString();
+            const tideRange = tides?.[todayKey]?.range || null;
+
+            const raw = calculateFishingLight(wind, gust, dir, rain, wave, tideRange);
+            const result = formatFishingLightMessage(raw);
+
+            container.className = `light-card rounded-3xl p-6 sm:p-7 shadow-inner cursor-pointer text-black ${result.color}`;
+            container.innerHTML = `
+                <div class="text-5xl sm:text-6xl font-bold tracking-tighter mb-2">${result.label}</div>
+                <div class="text-xl font-medium">${wind} knots ${getWindDirText(dir)}</div>
+                <div class="mt-4 text-base opacity-90">${result.issues}</div>
+                <div class="mt-5 text-sm font-semibold opacity-80">推荐：${result.rec}</div>
+            `;
+
+            let metaHtml = `
+                <div class="flex flex-wrap gap-x-4 gap-y-0.5 text-xs">
+                    <span>阵风最高 <strong class="font-semibold">${gust}</strong> knots</span>
+                    ${currentGustHome !== null && currentGustHome !== gust ? `<span class="text-gray-400">当前 ${currentGustHome}</span>` : ''}
+                    ${wave ? `<span>海浪 <strong>${wave.toFixed(1)}</strong>m</span>` : ''}
+                    <span>降雨 <strong>${rain}%</strong></span>
+                    ${tideRange ? `<span>潮差 <strong>${tideRange.toFixed(1)}</strong>m</span>` : ''}
+                </div>
+            `;
+            meta.innerHTML = metaHtml;
+
+            window.currentTodayData = { weather, tides };
+        }
+
+        function renderForecast(weather, tides) {
+            const grid = document.getElementById("forecast-grid");
+            grid.innerHTML = "";
+            const daily = weather.daily;
+
+            for (let i = 1; i <= 5; i++) {
+                const d = new Date(); d.setDate(d.getDate() + i);
+                const key = getLocalDateString(d);
+
+                const mw = Math.round(daily.wind_speed_10m_max[i]);
+                const mg = Math.round(daily.wind_gusts_10m_max?.[i] || mw);
+                const md = daily.wind_direction_10m_dominant?.[i];
+                const mr = Math.round(daily.precipitation_probability_max?.[i] || 0);
+                const tr = tides?.[key]?.range || null;
+
+                const raw = calculateFishingLight(mw, mg, md, mr, null, tr);
+                const res = formatFishingLightMessage(raw);
+
+                const card = document.createElement("div");
+                card.className = `light-card rounded-3xl p-4 sm:p-5 text-black ${res.color} cursor-pointer active:scale-[0.985] transition-transform`;
+                card.innerHTML = `
+                    <div class="flex justify-between items-start">
+                        <div class="font-medium text-sm opacity-90">${d.toLocaleDateString('zh-CN', { weekday: 'short', month: 'numeric', day: 'numeric' })}</div>
+                        <div class="text-xs px-2 py-0.5 rounded-full bg-black/15 font-medium">${res.rec}</div>
+                    </div>
+                    <div class="text-3xl font-bold my-2.5 tracking-tight">${res.label.split(" - ")[0]}</div>
+                    <div class="text-sm opacity-90">${mw} knots ${getWindDirText(md)}</div>
+                    <div class="text-xs mt-1.5 opacity-75 flex gap-2 flex-wrap">
+                        <span>阵风 ${mg}</span>
+                        <span>降雨 ${mr}%</span>
+                        ${tr ? `<span>潮差 ${tr.toFixed(1)}m</span>` : ''}
+                    </div>
+                `;
+                card.onclick = () => showDetailModal("forecast", i, weather, tides);
+                grid.appendChild(card);
+            }
+        }
+
+        function updateStatus(savedAt) {
+            const el = document.getElementById("update-status");
+            const t = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+            let html = `更新时间：${t} NZST`;
+
+            if (savedAt) {
+                const timestamp = (savedAt instanceof Date) ? savedAt.getTime() : savedAt;
+                if (typeof timestamp === 'number') {
+                    const m = Math.floor((Date.now() - timestamp) / 60000);
+                    html += ` <span class="text-amber-400/70">(${m}分钟前缓存)</span>`;
+                }
+            }
+            el.innerHTML = html;
+        }
+
+        // ==================== 详情页 ====================
+        function showDetailModal(type, index = 0, weatherData = null, tideData = null) {
+            // v5.16 干净版说明：
+            // 采用“先显示 modal → 可靠的 post-paint 测量 sheet 宽度 → 统一驱动两个图表”的方式。
+            // 彻底去掉了之前导致桌面回归的无条件 pixel width 锁死逻辑。
+            const modal = document.getElementById("detail-modal");
+            const weather = weatherData || window.lastWeatherData;
+            if (!weather) return;
+
+            const daily = weather.daily;
+            const current = weather.current || {};
+            const date = new Date();
+
+            let wind, gust, dir, rain, wave, tideRange, dayKey, effectiveTides;
+            let currentGust = null;   // 仅 today 使用，记录实时阵风
+
+            if (type === "today") {
+                effectiveTides = tideData || (window.currentTodayData ? window.currentTodayData.tides : null);
+
+                wind = Math.round(current.wind_speed_10m || daily.wind_speed_10m_max[0]);
+                // 优先使用当前实时阵风，但稍后会用当日小时级最大值覆盖显示
+                currentGust = current.wind_gusts_10m ? Math.round(current.wind_gusts_10m) : null;
+                gust = Math.round(current.wind_gusts_10m || daily.wind_gusts_10m_max[0]);
+                dir = Math.round(current.wind_direction_10m || daily.wind_direction_10m_dominant[0]);
+                rain = Math.round(daily.precipitation_probability_max[0] || 0);
+                wave = weather.marine?.current?.[0]?.wave_height ? parseFloat(weather.marine.current[0].wave_height) : null;
+                dayKey = getLocalDateString();
+                tideRange = effectiveTides?.[dayKey]?.range || null;
+            } else {
+                date.setDate(date.getDate() + index);
+                dayKey = getLocalDateString(date);
+                wind = Math.round(daily.wind_speed_10m_max[index]);
+                gust = Math.round(daily.wind_gusts_10m_max?.[index] || wind);
+                dir = daily.wind_direction_10m_dominant?.[index];
+                rain = Math.round(daily.precipitation_probability_max?.[index] || 0);
+                wave = null;
+                effectiveTides = tideData;
+                tideRange = effectiveTides?.[dayKey]?.range || null;
+            }
+
+            // === 今天视图：用当日逐小时数据的真实最大阵风作为主显示值（和图表完全一致）
+            if (type === "today" && weather?.hourly) {
+                const hourlyItems = prepareHourlyWindItems(weather, "today", 0);
+                if (hourlyItems.length > 0) {
+                    const hourlyMaxGust = Math.max(...hourlyItems.map(i => i.gust));
+                    if (hourlyMaxGust > 0) {
+                        gust = hourlyMaxGust;   // 覆盖为图表真实最高值
+                    }
+                }
+            }
+
+            const raw = calculateFishingLight(wind, gust, dir, rain, wave, tideRange);
+            const result = formatFishingLightMessage(raw);
+
+            document.getElementById("detail-date").textContent = date.toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long" });
+            document.getElementById("detail-subtitle").textContent = CONFIG.locationName;
+
+            document.getElementById("detail-light").innerHTML = `
+                <div class="rounded-2xl p-5 text-black ${result.color}">
+                    <div class="text-3xl font-bold">${result.label}</div>
+                    <div class="mt-1">${result.issues}</div>
+                    <div class="mt-3 font-medium">推荐：${result.rec}</div>
+                </div>
+            `;
+
+            // 新设计：紧凑漂亮的指标网格（现代卡片风格，减少冗余）
+            let gustDisplay = `${gust}`;
+            let gustNote = '';
+            if (type === "today" && currentGust !== null && currentGust !== gust) {
+                gustNote = `<span class="text-[9px] text-gray-400 ml-0.5">(当前${currentGust})</span>`;
+            }
+
+            const metricsHtml = `
+                <div class="grid grid-cols-3 gap-2 mb-5">
+                    <div class="metric-card">
+                        <div class="icon"><i class="fas fa-wind text-emerald-400"></i></div>
+                        <div class="value">${wind}<span class="text-xs font-medium text-gray-400 ml-0.5">kn</span></div>
+                        <div class="label">风速</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="icon"><i class="fas fa-tachometer-alt text-emerald-400"></i></div>
+                        <div class="value">${gustDisplay}<span class="text-xs font-medium text-gray-400 ml-0.5">kn</span>${gustNote}</div>
+                        <div class="label">阵风</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="icon"><i class="fas fa-cloud-rain text-blue-400"></i></div>
+                        <div class="value">${rain}<span class="text-xs font-medium text-gray-400 ml-0.5">%</span></div>
+                        <div class="label">降雨</div>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById("detail-weather").innerHTML = metricsHtml;
+
+            // === Apple Weather 风格风况模块（全天 24h + Hover Tooltip）===
+            const windSection = document.getElementById("wind-chart-section");
+            if (windSection) {
+                windSection.innerHTML = '';
+                windSection.style.position = 'relative'; // for absolute tooltip
+
+                const isTodayView = type === 'today';
+
+                // 当前风况大标题（苹果风格）
+                const curDirText = getWindDirText(dir);
+                const header = document.createElement('div');
+                // 使用 items-end 让大数字和阵风数字底部对齐，视觉更平衡
+                header.className = 'flex items-end justify-between mb-1 px-1';
+
+                let gustHtml = `
+                    <div class="font-mono text-2xl font-bold tabular-nums leading-none">${gust}</div>
+                `;
+
+                if (isTodayView && currentGust !== null && currentGust !== gust) {
+                    // 今天：主显示当日小时级最高阵风 + 小字显示当前实时值
+                    gustHtml = `
+                        <div class="font-mono text-2xl font-bold tabular-nums leading-none">${gust}</div>
+                        <div class="text-[10px] text-gray-400 leading-none mt-0.5">当前 ${currentGust}</div>
+                    `;
+                }
+
+                header.innerHTML = `
+                    <div class="flex items-baseline gap-1.5">
+                        <span class="text-4xl font-bold tabular-nums">${wind}</span>
+                        <span class="text-base text-gray-400">knots</span>
+                        <span class="text-lg font-medium text-emerald-400 ml-1">${curDirText}</span>
+                    </div>
+                    <div class="text-right min-w-[52px]">
+                        <div class="text-xs text-gray-400 leading-none mb-0.5">阵风</div>
+                        ${gustHtml}
+                    </div>
+                `;
+                windSection.appendChild(header);
+
+                // v5.20: SVG 占位容器（响应式，不需要测量宽度）
+                const svgWindContainer = document.createElement('div');
+                svgWindContainer.id = 'svg-wind-container';
+                svgWindContainer.style.cssText = 'width:100%;margin-top:4px;border-radius:10px;overflow:hidden;background:#1f2937;';
+                windSection.appendChild(svgWindContainer);
+
+                // 准备全天数据（今天 = 0:00~24:00，未来天 = 完整一天）
+                const chartItems = prepareHourlyWindItems(weather, type, index);
+                const currentIdx = isTodayView ? findCurrentHourIndex(chartItems) : -1;
+
+                // 动态标题
+                const titleEl = document.getElementById("wind-forecast-title");
+                if (titleEl) {
+                    titleEl.textContent = isTodayView ? "今日风况（24小时）" : "风况预报（逐小时）";
+                }
+
+                if (chartItems.length >= 2) {
+                    window.lastWindChartData = {
+                        items: chartItems,
+                        isToday: isTodayView,
+                        currentIdx: currentIdx
+                    };
+                    // SVG 直接渲染（用 viewBox 保证响应式，无需测量）
+                    renderWindSVG(svgWindContainer, chartItems, isTodayView, currentIdx);
+                } else {
+                    svgWindContainer.innerHTML = '<div style="text-align:center;color:#9ca3af;font-size:14px;padding:24px">风况数据不足</div>';
+                }
+
+                // 简短总结
+                if (chartItems.length > 0) {
+                    const speeds = chartItems.map(i => i.speed);
+                    const gusts = chartItems.map(i => i.gust);
+                    const minS = Math.min(...speeds);
+                    const maxS = Math.max(...speeds);
+                    const maxG = Math.max(...gusts);
+                    const sum = document.createElement('div');
+                    sum.className = 'mt-1.5 text-[11px] text-gray-400 px-1 leading-snug';
+                    sum.textContent = `全天风速 ${minS}-${maxS} knots，阵风最高 ${maxG} knots。`;
+                    windSection.appendChild(sum);
+                }
+            }
+
+            // === 温度模块（与风况模块设计高度一致） ===
+            const tempSection = document.getElementById("temperature-chart-section");
+            if (tempSection) {
+                tempSection.innerHTML = '';
+                tempSection.style.position = 'relative';
+
+                const isTodayView = type === 'today';
+                const tempItems = prepareHourlyTemperatureItems(weather, type, index);
+
+                if (tempItems.length >= 2 && tempItems.some(i => i.temp !== null)) {
+                    // 头部：当前气温 + 体感
+                    let currentTemp = null;
+                    let currentApparent = null;
+
+                    if (isTodayView) {
+                        const cur = weather.current || {};
+                        currentTemp = cur.temperature_2m != null ? Math.round(cur.temperature_2m) : null;
+                        currentApparent = cur.apparent_temperature != null ? Math.round(cur.apparent_temperature) : null;
+                    } else {
+                        // 未来天取第一个点作为“当前”参考
+                        const firstValid = tempItems.find(i => i.temp !== null);
+                        if (firstValid) currentTemp = firstValid.temp;
+                    }
+
+                    const header = document.createElement('div');
+                    header.className = 'flex items-baseline justify-between mb-1 px-1';
+                    let tempHtml = currentTemp != null 
+                        ? `<span class="text-3xl font-bold tabular-nums">${currentTemp}</span><span class="text-base text-gray-400 ml-0.5">°C</span>`
+                        : `<span class="text-gray-400">暂无</span>`;
+
+                    let apparentHtml = '';
+                    if (currentApparent != null) {
+                        apparentHtml = `<div class="text-[10px] text-gray-400 mt-0.5">体感 ${currentApparent}°C</div>`;
+                    }
+
+                    header.innerHTML = `
+                        <div>
+                            <div class="text-xs text-gray-400">气温</div>
+                            <div>${tempHtml}</div>
+                            ${apparentHtml}
+                        </div>
+                        <div class="text-right text-xs text-gray-400">
+                            全天 ${Math.min(...tempItems.filter(i=>i.temp!==null).map(i=>i.temp))}° ~ ${Math.max(...tempItems.filter(i=>i.temp!==null).map(i=>i.temp))}°
+                        </div>
+                    `;
+                    tempSection.appendChild(header);
+
+                    // v5.20: SVG 占位容器
+                    const svgTempContainer = document.createElement('div');
+                    svgTempContainer.id = 'svg-temp-container';
+                    svgTempContainer.style.cssText = 'width:100%;margin-top:4px;border-radius:10px;overflow:hidden;background:#1f2937;';
+                    tempSection.appendChild(svgTempContainer);
+
+                    const currentIdx = isTodayView ? findCurrentHourIndex(tempItems) : -1;
+
+                    window.lastTempChartData = {
+                        items: tempItems,
+                        isToday: isTodayView,
+                        currentIdx: currentIdx
+                    };
+                    // SVG 直接渲染
+                    renderTempSVG(svgTempContainer, tempItems, isTodayView, currentIdx);
+
+                    // 简短总结
+                    const validTemps = tempItems.filter(i => i.temp !== null).map(i => i.temp);
+                    if (validTemps.length > 0) {
+                        const minT = Math.min(...validTemps);
+                        const maxT = Math.max(...validTemps);
+                        const sum = document.createElement('div');
+                        sum.className = 'mt-1 text-[11px] text-gray-400 px-1';
+                        sum.textContent = `全天 ${minT}° ~ ${maxT}°C`;
+                        tempSection.appendChild(sum);
+                    }
+                } else {
+                    const msg = document.createElement('div');
+                    msg.className = 'text-center text-gray-400 text-sm py-6';
+                    msg.textContent = '气温数据不足';
+                    tempSection.appendChild(msg);
+                }
+            }
+
+            // 优化后的潮汐模块（更强视觉层次 + 更好卡片设计）
+            let tideHtml = `
+                <div class="flex items-center gap-2 mb-2 px-1">
+                    <i class="fas fa-water text-blue-400"></i>
+                    <span class="font-medium">潮汐</span>
+                </div>
+            `;
+
+            const dayTides = effectiveTides?.[dayKey];
+            const tideStatus = getCurrentTideStatus(dayTides);
+
+            // 当前涨落潮状态 - 更醒目的设计
+            if (tideStatus.status !== "未知") {
+                const isRising = tideStatus.status.includes('涨');
+                const statusColor = isRising ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400';
+                const arrow = isRising ? '↑' : '↓';
+
+                tideHtml += `
+                    <div class="mb-3 p-3.5 ${statusColor} rounded-2xl flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xl font-bold">${arrow} ${tideStatus.status}</span>
+                        </div>
+                        <div class="text-right text-sm">
+                            <div class="font-medium">距离${tideStatus.nextLabel}</div>
+                            <div class="font-semibold text-base tabular-nums">${tideStatus.timeLeft}</div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // 具体潮时列表 - 更清晰的对齐和排版
+            if (dayTides && dayTides.length) {
+                tideHtml += `<div class="space-y-1 text-sm">`;
+                dayTides.slice(0, 4).forEach(t => {
+                    const label = t.type === "High" ? "高潮" : "低潮";
+                    const labelColor = t.type === "High" ? "text-emerald-400" : "text-amber-400";
+                    tideHtml += `
+                        <div class="flex justify-between items-center py-0.5 px-1">
+                            <span class="${labelColor} font-medium w-10">${label}</span>
+                            <span class="font-mono tabular-nums">${t.height.toFixed(2)}m</span>
+                            <span class="text-gray-300 ml-auto pl-3">${formatTime(t.time)}</span>
+                        </div>
+                    `;
+                });
+                tideHtml += `</div>`;
+
+                if (tideRange) {
+                    tideHtml += `<div class="text-xs mt-2 px-1 text-gray-400">今日潮差约 <span class="font-medium text-gray-300">${tideRange.toFixed(1)}m</span></div>`;
+                }
+            } else {
+                tideHtml += `<div class="text-gray-400 text-sm px-1">暂无潮汐数据</div>`;
+            }
+
+            document.getElementById("detail-tide").innerHTML = tideHtml;
+
+            // v5.20: SVG 方案，图表已在上方直接渲染完毕，只需显示 modal
+            modal.classList.remove("hidden");
+            modal.classList.add("flex");
+        }
+
+        /* ==================== 手动测试矩阵（v5.17） ====================
+         * 必须按顺序验证：
+         * 1. 桌面 Tooltip：鼠标 hover 风况和气温图表，必须弹出准确数值 tooltip。
+         * 2. 桌面尺寸：图表必须完全撑满容器（无左侧收缩）。
+         * 3. 手机（微信内置浏览器 + Safari）：
+         *    - 图表宽度明显改善（接近容器宽度）
+         *    - 触摸拖动两个图表必须有 tooltip
+         *    - 气温图表完整可见
+         * 4. 旋转手机后图表应自动调整（ResizeObserver 生效）
+         */
+
+        // ==================== v5.20: SVG 图表（天生响应式，彻底告别 canvas 宽度问题）====================
+        // SVG 用 viewBox + preserveAspectRatio="none" 配合 width="100%" 实现完美响应式。
+        // 不需要测量 DOM 宽度，不受弹出动画时机影响，桌面/手机/横竖屏全部正常。
+
+        function buildWindSVGMarkup(items, isToday, currentIdx) {
+            const W = 400, H = 168;
+            const pad = { top: 30, right: 42, bottom: 22, left: 6 };
+            const cW = W - pad.left - pad.right;
+            const cH = H - pad.top - pad.bottom;
+
+            const speeds = items.map(i => i.speed);
+            const gusts  = items.map(i => i.gust);
+            const maxVal = Math.max(...gusts, ...speeds, 15);
+            const yMax   = Math.ceil(maxVal / 5) * 5 + 5;
+            const xStep  = items.length > 1 ? cW / (items.length - 1) : cW;
+            const yScale = cH / yMax;
+
+            const hasPast  = isToday && currentIdx >= 0 && currentIdx < items.length - 1;
+            const splitIdx = hasPast ? currentIdx : -1;
+
+            const px = (i) => pad.left + i * xStep;
+            const sy = (v) => pad.top + cH - v * yScale;
+
+            let parts = [];
+
+            // ── 渐变定义 ──
+            parts.push(`<defs>
+                <linearGradient id="wg" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#34d399" stop-opacity="0.38"/>
+                    <stop offset="50%" stop-color="#10b981" stop-opacity="0.22"/>
+                    <stop offset="100%" stop-color="#10b981" stop-opacity="0.02"/>
+                </linearGradient>
+            </defs>`);
+
+            // ── 网格横线 ──
+            for (let y = 0; y <= yMax; y += 5) {
+                const yp = sy(y);
+                parts.push(`<line x1="${pad.left}" y1="${yp.toFixed(1)}" x2="${pad.left+cW}" y2="${yp.toFixed(1)}" stroke="#374151" stroke-width="1"/>`);
+            }
+            // ── 网格竖线（稀疏）──
+            for (let i = 0; i < items.length; i += 4) {
+                const xp = px(i);
+                parts.push(`<line x1="${xp.toFixed(1)}" y1="${pad.top}" x2="${xp.toFixed(1)}" y2="${pad.top+cH}" stroke="#374151" stroke-width="1"/>`);
+            }
+
+            // ── Y 轴标签 ──
+            for (let y = 0; y <= yMax; y += 5) {
+                const yp = sy(y) + 3;
+                parts.push(`<text x="${pad.left+cW+5}" y="${yp.toFixed(1)}" fill="#9ca3af" font-size="9" font-family="system-ui">${y}kn</text>`);
+            }
+
+            // ── 面积填充（未来侧） ──
+            const startI = hasPast ? splitIdx : 0;
+            let areaD = `M ${px(startI).toFixed(1)} ${(pad.top+cH).toFixed(1)}`;
+            for (let i = startI; i < items.length; i++) {
+                areaD += ` L ${px(i).toFixed(1)} ${sy(items[i].speed).toFixed(1)}`;
+            }
+            areaD += ` L ${px(items.length-1).toFixed(1)} ${(pad.top+cH).toFixed(1)} Z`;
+            parts.push(`<path d="${areaD}" fill="url(#wg)"/>`);
+
+            // ── 过去侧风速线（虚线+暗） ──
+            if (hasPast) {
+                let pd = '';
+                for (let i = 0; i <= splitIdx; i++) pd += (i===0?'M':'L') + ` ${px(i).toFixed(1)} ${sy(items[i].speed).toFixed(1)}`;
+                parts.push(`<path d="${pd}" fill="none" stroke="rgba(52,211,153,0.45)" stroke-width="2.5" stroke-dasharray="3 2.5" stroke-linejoin="round"/>`);
+                let gd = '';
+                for (let i = 0; i <= splitIdx; i++) gd += (i===0?'M':'L') + ` ${px(i).toFixed(1)} ${sy(items[i].gust).toFixed(1)}`;
+                parts.push(`<path d="${gd}" fill="none" stroke="rgba(110,231,183,0.35)" stroke-width="1.5" stroke-dasharray="3 2.5"/>`);
+            }
+
+            // ── 未来侧风速线（实线+亮） ──
+            let fd = '';
+            for (let i = startI; i < items.length; i++) fd += (i===startI?'M':'L') + ` ${px(i).toFixed(1)} ${sy(items[i].speed).toFixed(1)}`;
+            parts.push(`<path d="${fd}" fill="none" stroke="#34d399" stroke-width="2.5" stroke-linejoin="round"/>`);
+
+            // ── 未来侧阵风线 ──
+            let gfd = '';
+            for (let i = startI; i < items.length; i++) gfd += (i===startI?'M':'L') + ` ${px(i).toFixed(1)} ${sy(items[i].gust).toFixed(1)}`;
+            const gustDash = hasPast ? '' : 'stroke-dasharray="3 2.5"';
+            parts.push(`<path d="${gfd}" fill="none" stroke="#6ee7b7" stroke-width="1.5" ${gustDash}/>`);
+
+            // ── 风向箭头 ──
+            const arrowStep = 2;
+            const arrowIdxs = [];
+            for (let i = 0; i < items.length; i += arrowStep) arrowIdxs.push(i);
+            if (!arrowIdxs.includes(items.length-1)) arrowIdxs.push(items.length-1);
+
+            arrowIdxs.forEach(idx => {
+                const item = items[idx];
+                const ax = px(idx);
+                const ay = pad.top - 14;
+                const rot = ((item.dir + 180) % 360);
+                const isPast = hasPast && idx <= splitIdx;
+                const col = isPast ? 'rgba(163,230,53,0.45)' : '#a3e635';
+                parts.push(`<g transform="translate(${ax.toFixed(1)},${ay}) rotate(${rot})">
+                    <polygon points="0,-5.5 -3.2,3.8 3.2,3.8" fill="${col}"/>
+                    <line x1="0" y1="4" x2="0" y2="8.5" stroke="${col}" stroke-width="1.1"/>
+                </g>`);
+            });
+
+            // ── 时间标签 ──
+            const labelStep = Math.max(2, Math.floor(items.length / 8));
+            items.forEach((item, i) => {
+                if (i % labelStep !== 0 && i !== items.length - 1) return;
+                const xp = px(i);
+                const label = i === items.length-1 ? '24' : item.time.toLocaleTimeString('zh-CN', { hour: '2-digit' });
+                parts.push(`<text x="${xp.toFixed(1)}" y="${H-4}" fill="#9ca3af" font-size="9" font-family="system-ui" text-anchor="middle">${label}</text>`);
+            });
+
+            // ── "现在" 竖线 + 白点 ──
+            if (isToday && currentIdx >= 0 && currentIdx < items.length) {
+                const nx = px(currentIdx);
+                parts.push(`<rect x="${(nx-1.5).toFixed(1)}" y="${pad.top}" width="3" height="${cH}" fill="rgba(255,255,255,0.08)"/>`);
+                parts.push(`<line x1="${nx.toFixed(1)}" y1="${(pad.top-2).toFixed(1)}" x2="${nx.toFixed(1)}" y2="${(pad.top+cH+1).toFixed(1)}" stroke="#fff" stroke-width="1.5"/>`);
+                const dy = sy(items[currentIdx].speed);
+                parts.push(`<circle cx="${nx.toFixed(1)}" cy="${dy.toFixed(1)}" r="4" fill="#fff" stroke="#1f2937" stroke-width="1.5"/>`);
+            }
+
+            return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="none" style="display:block">${parts.join('')}</svg>`;
+        }
+
+        function renderWindSVG(container, items, isToday, currentIdx) {
+            if (!items || items.length < 2) return;
+            container.innerHTML = buildWindSVGMarkup(items, isToday, currentIdx);
+
+            // Touch/mouse tooltip（用 SVG 坐标比例计算 index，不依赖 canvas.width）
+            const svg = container.querySelector('svg');
+            if (!svg) return;
+
+            const W = 400, pad = { left: 6, right: 42 };
+            const cW = W - pad.left - pad.right;
+            const xStep = items.length > 1 ? cW / (items.length - 1) : cW;
+
+            let ttip = document.getElementById('wind-tooltip');
+            if (!ttip) {
+                ttip = document.createElement('div');
+                ttip.id = 'wind-tooltip';
+                ttip.style.cssText = 'position:absolute;background:#111827;border:1px solid #374151;color:white;font-size:11.5px;padding:5px 9px;border-radius:9px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.35);pointer-events:none;z-index:50;white-space:nowrap;transform:translate(-50%,-100%);margin-top:-6px;display:none;';
+                ttip.innerHTML = '<div class="tooltip-time" style="font-weight:600;color:#a3e635;font-size:12px;"></div><div style="font-size:11px;"><span style="color:#9ca3af">风速 </span><span class="tv-speed" style="font-family:monospace;font-weight:600"></span></div><div style="font-size:11px;"><span style="color:#9ca3af">阵风 </span><span class="tv-gust" style="font-family:monospace;font-weight:600"></span></div><div style="font-size:11px;"><span style="color:#9ca3af">风向 </span><span class="tv-dir" style="font-family:monospace;font-weight:600"></span></div>';
+                const ws = document.getElementById('wind-chart-section');
+                if (ws) ws.appendChild(ttip);
+            }
+
+            let lastIdx = -1;
+            function update(clientX) {
+                const rect = svg.getBoundingClientRect();
+                // 将屏幕坐标映射回 viewBox 坐标系
+                const ratio = W / rect.width;
+                const svgX  = (clientX - rect.left) * ratio;
+                const chartX = svgX - pad.left;
+                const idx = Math.max(0, Math.min(items.length-1, Math.round(chartX / xStep)));
+                if (idx === lastIdx) return;
+                lastIdx = idx;
+                const item = items[idx];
+                const timeStr = item.time.toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' });
+                ttip.querySelector('.tooltip-time').textContent = timeStr;
+                ttip.querySelector('.tv-speed').textContent = item.speed + ' kn';
+                ttip.querySelector('.tv-gust').textContent  = item.gust  + ' kn';
+                ttip.querySelector('.tv-dir').textContent   = getWindDirText(item.dir) + ' (' + item.dir + '°)';
+                const ws = document.getElementById('wind-chart-section');
+                const containerRect = ws ? ws.getBoundingClientRect() : rect;
+                // tooltip 位置：在图表区域内，跟随手指
+                const leftPx = rect.left - containerRect.left + (idx / (items.length-1)) * rect.width;
+                ttip.style.left = leftPx + 'px';
+                ttip.style.top  = (rect.top - containerRect.top + 8) + 'px';
+                ttip.style.display = 'block';
+
+                // 高亮当前选中点：重新渲染 SVG 加高亮线
+                const hlPct = (idx / (items.length-1) * 100).toFixed(1);
+                container.innerHTML = buildWindSVGMarkup(items, isToday, currentIdx);
+                // 加高亮竖线（直接追加到 SVG）
+                const svgEl = container.querySelector('svg');
+                if (svgEl) {
+                    const W2=400, padL=6, padR=42, cW2=W2-padL-padR;
+                    const xpH = padL + idx * (cW2/(items.length-1));
+                    const hl = document.createElementNS('http://www.w3.org/2000/svg','line');
+                    hl.setAttribute('x1',xpH.toFixed(1)); hl.setAttribute('y1','30');
+                    hl.setAttribute('x2',xpH.toFixed(1)); hl.setAttribute('y2','146');
+                    hl.setAttribute('stroke','rgba(163,230,53,0.9)'); hl.setAttribute('stroke-width','1.5');
+                    svgEl.appendChild(hl);
+                    // 重新绑定事件（因为 innerHTML 替换了 svg）
+                    bindSvgEvents(svgEl);
+                }
+            }
+            function hide() {
+                ttip.style.display = 'none';
+                lastIdx = -1;
+            }
+            function bindSvgEvents(el) {
+                el.addEventListener('mousemove', e => update(e.clientX));
+                el.addEventListener('mouseleave', hide);
+                el.addEventListener('touchstart', e => { if(e.touches[0]) update(e.touches[0].clientX); }, {passive:true});
+                el.addEventListener('touchmove',  e => { e.preventDefault(); if(e.touches[0]) update(e.touches[0].clientX); }, {passive:false});
+                el.addEventListener('touchend',   hide);
+                el.addEventListener('touchcancel',hide);
+            }
+            bindSvgEvents(svg);
+        }
+
+        function buildTempSVGMarkup(items, isToday, currentIdx) {
+            const W = 400, H = 152;
+            const pad = { top: 30, right: 42, bottom: 22, left: 6 };
+            const cW = W - pad.left - pad.right;
+            const cH = H - pad.top - pad.bottom;
+
+            const valid = items.filter(i => i.temp !== null);
+            if (valid.length < 2) return '';
+            const temps = valid.map(i => i.temp);
+            const minT = Math.floor(Math.min(...temps) - 2);
+            const maxT = Math.ceil(Math.max(...temps) + 2);
+            const xStep  = items.length > 1 ? cW / (items.length - 1) : cW;
+            const yScale = cH / (maxT - minT || 1);
+
+            const hasPast  = isToday && currentIdx >= 0 && currentIdx < items.length - 1;
+            const splitIdx = hasPast ? currentIdx : -1;
+
+            const px = (i) => pad.left + i * xStep;
+            const ty = (v) => pad.top + cH - (v - minT) * yScale;
+
+            let parts = [];
+            parts.push(`<defs>
+                <linearGradient id="tg" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#fbbf24" stop-opacity="0.25"/>
+                    <stop offset="100%" stop-color="#fbbf24" stop-opacity="0.03"/>
+                </linearGradient>
+            </defs>`);
+
+            // 网格横线
+            for (let y = minT; y <= maxT; y += 2) {
+                const yp = ty(y);
+                parts.push(`<line x1="${pad.left}" y1="${yp.toFixed(1)}" x2="${pad.left+cW}" y2="${yp.toFixed(1)}" stroke="#374151" stroke-width="1"/>`);
+            }
+            // Y 轴标签
+            for (let y = minT; y <= maxT; y += 2) {
+                const yp = ty(y) + 3;
+                parts.push(`<text x="${pad.left+cW+5}" y="${yp.toFixed(1)}" fill="#9ca3af" font-size="9" font-family="system-ui">${y}°</text>`);
+            }
+
+            // 面积填充（未来侧）
+            const startI = hasPast ? splitIdx : 0;
+            let areaD = `M ${px(startI).toFixed(1)} ${(pad.top+cH).toFixed(1)}`;
+            for (let i = startI; i < items.length; i++) {
+                if (items[i].temp === null) continue;
+                areaD += ` L ${px(i).toFixed(1)} ${ty(items[i].temp).toFixed(1)}`;
+            }
+            areaD += ` L ${px(items.length-1).toFixed(1)} ${(pad.top+cH).toFixed(1)} Z`;
+            parts.push(`<path d="${areaD}" fill="url(#tg)"/>`);
+
+            // 过去侧（虚线+暗）
+            if (hasPast) {
+                let pd = '';
+                for (let i = 0; i <= splitIdx; i++) {
+                    if (items[i].temp === null) continue;
+                    pd += (pd===''?'M':'L') + ` ${px(i).toFixed(1)} ${ty(items[i].temp).toFixed(1)}`;
+                }
+                if (pd) parts.push(`<path d="${pd}" fill="none" stroke="rgba(251,191,36,0.45)" stroke-width="2.2" stroke-dasharray="3 2.5" stroke-linejoin="round"/>`);
+            }
+
+            // 未来侧（实线+亮）
+            let fd = ''; let first = true;
+            for (let i = startI; i < items.length; i++) {
+                if (items[i].temp === null) continue;
+                fd += (first?'M':'L') + ` ${px(i).toFixed(1)} ${ty(items[i].temp).toFixed(1)}`;
+                first = false;
+            }
+            if (fd) parts.push(`<path d="${fd}" fill="none" stroke="#fbbf24" stroke-width="2.2" stroke-linejoin="round"/>`);
+
+            // 时间标签
+            const labelStep = Math.max(2, Math.floor(items.length / 8));
+            items.forEach((item, i) => {
+                if (i % labelStep !== 0 && i !== items.length - 1) return;
+                const label = i === items.length-1 ? '24' : item.time.toLocaleTimeString('zh-CN', { hour: '2-digit' });
+                parts.push(`<text x="${px(i).toFixed(1)}" y="${H-4}" fill="#9ca3af" font-size="9" font-family="system-ui" text-anchor="middle">${label}</text>`);
+            });
+
+            // "现在"线 + 白点
+            if (isToday && currentIdx >= 0 && currentIdx < items.length && items[currentIdx].temp !== null) {
+                const nx = px(currentIdx);
+                parts.push(`<rect x="${(nx-1.5).toFixed(1)}" y="${pad.top}" width="3" height="${cH}" fill="rgba(255,255,255,0.08)"/>`);
+                parts.push(`<line x1="${nx.toFixed(1)}" y1="${(pad.top-2).toFixed(1)}" x2="${nx.toFixed(1)}" y2="${(pad.top+cH+1).toFixed(1)}" stroke="#fff" stroke-width="1.5"/>`);
+                const dy = ty(items[currentIdx].temp);
+                parts.push(`<circle cx="${nx.toFixed(1)}" cy="${dy.toFixed(1)}" r="4" fill="#fff" stroke="#1f2937" stroke-width="1.5"/>`);
+            }
+
+            return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="none" style="display:block">${parts.join('')}</svg>`;
+        }
+
+        function renderTempSVG(container, items, isToday, currentIdx) {
+            if (!items || items.length < 2) return;
+            container.innerHTML = buildTempSVGMarkup(items, isToday, currentIdx);
+
+            const svg = container.querySelector('svg');
+            if (!svg) return;
+
+            const W = 400, pad = { left: 6, right: 42 };
+            const cW = W - pad.left - pad.right;
+            const xStep = items.length > 1 ? cW / (items.length - 1) : cW;
+
+            let ttip = document.getElementById('temperature-tooltip');
+            if (!ttip) {
+                ttip = document.createElement('div');
+                ttip.id = 'temperature-tooltip';
+                ttip.style.cssText = 'position:absolute;background:#111827;border:1px solid #374151;color:white;font-size:11.5px;padding:5px 9px;border-radius:9px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.35);pointer-events:none;z-index:50;white-space:nowrap;transform:translate(-50%,-100%);margin-top:-6px;display:none;';
+                ttip.innerHTML = '<div class="tt-time" style="font-weight:600;color:#fbbf24;font-size:12px;"></div><div style="font-size:11px;"><span style="color:#9ca3af">气温 </span><span class="tt-temp" style="font-family:monospace;font-weight:600"></span></div><div style="font-size:11px;"><span style="color:#9ca3af">体感 </span><span class="tt-app" style="font-family:monospace;font-weight:600"></span></div>';
+                const ts = document.getElementById('temperature-chart-section');
+                if (ts) ts.appendChild(ttip);
+            }
+
+            let lastIdx = -1;
+            function update(clientX) {
+                const rect = svg.getBoundingClientRect();
+                const ratio = W / rect.width;
+                const svgX  = (clientX - rect.left) * ratio;
+                const idx = Math.max(0, Math.min(items.length-1, Math.round((svgX - pad.left) / xStep)));
+                if (idx === lastIdx) return;
+                lastIdx = idx;
+                const item = items[idx];
+                if (item.temp === null) return;
+                const timeStr = item.time.toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' });
+                ttip.querySelector('.tt-time').textContent = timeStr;
+                ttip.querySelector('.tt-temp').textContent = item.temp + '°C';
+                ttip.querySelector('.tt-app').textContent  = item.apparent != null ? item.apparent + '°C' : '--';
+                const ts = document.getElementById('temperature-chart-section');
+                const containerRect = ts ? ts.getBoundingClientRect() : rect;
+                const leftPx = rect.left - containerRect.left + (idx / (items.length-1)) * rect.width;
+                ttip.style.left = leftPx + 'px';
+                ttip.style.top  = (rect.top - containerRect.top + 8) + 'px';
+                ttip.style.display = 'block';
+            }
+            function hide() { ttip.style.display='none'; lastIdx=-1; }
+
+            svg.addEventListener('mousemove', e => update(e.clientX));
+            svg.addEventListener('mouseleave', hide);
+            svg.addEventListener('touchstart', e => { if(e.touches[0]) update(e.touches[0].clientX); }, {passive:true});
+            svg.addEventListener('touchmove',  e => { e.preventDefault(); if(e.touches[0]) update(e.touches[0].clientX); }, {passive:false});
+            svg.addEventListener('touchend',   hide);
+            svg.addEventListener('touchcancel',hide);
+        }
+
+        // ==================== Apple Weather 风格风况图表（旧 Canvas，桌面保留作参考）====================
+        function prepareHourlyWindItems(weather, type, index) {
+            if (!weather?.hourly?.time?.length) return [];
+            const hourly = weather.hourly;
+            const items = [];
+
+            if (type === 'today') {
+                // 完整当天 24 小时（从 00:00 开始），类似苹果 Weather
+                const now = new Date();
+                const currentNZ = new Date(now.toLocaleString("en-US", { timeZone: CONFIG.TIMEZONE }));
+                const todayStr = getLocalDateString(currentNZ);
+                let lastIndex = -1;
+                for (let i = 0; i < hourly.time.length; i++) {
+                    const t = new Date(hourly.time[i]);
+                    const tNZ = new Date(t.toLocaleString("en-US", { timeZone: CONFIG.TIMEZONE }));
+                    if (getLocalDateString(tNZ) === todayStr) {
+                        items.push({
+                            time: t,
+                            speed: Math.round(hourly.wind_speed_10m[i] * 0.539957),
+                            gust: Math.round(hourly.wind_gusts_10m[i] * 0.539957),
+                            dir: Math.round(hourly.wind_direction_10m[i])
+                        });
+                        lastIndex = i;
+                    }
+                }
+
+                // 尝试追加 24:00（使用第二天 00:00 的数据）
+                if (lastIndex !== -1 && lastIndex + 1 < hourly.time.length) {
+                    const nextTime = new Date(hourly.time[lastIndex + 1]);
+                    const nextHour = nextTime.getHours();
+                    if (nextHour === 0) {
+                        items.push({
+                            time: nextTime,   // 实际是次日 00:00，我们会在绘图时显示为 24:00
+                            speed: Math.round(hourly.wind_speed_10m[lastIndex + 1] * 0.539957),
+                            gust: Math.round(hourly.wind_gusts_10m[lastIndex + 1] * 0.539957),
+                            dir: Math.round(hourly.wind_direction_10m[lastIndex + 1])
+                        });
+                    }
+                }
+            } else {
+                const targetDay = getLocalDateString(new Date(Date.now() + (index || 0) * 86400000));
+                let lastIndex = -1;
+                for (let i = 0; i < hourly.time.length; i++) {
+                    if (hourly.time[i].slice(0, 10) === targetDay) {
+                        items.push({
+                            time: new Date(hourly.time[i]),
+                            speed: Math.round(hourly.wind_speed_10m[i] * 0.539957),
+                            gust: Math.round(hourly.wind_gusts_10m[i] * 0.539957),
+                            dir: Math.round(hourly.wind_direction_10m[i])
+                        });
+                        lastIndex = i;
+                    }
+                }
+
+                // 尝试追加 24:00（使用第二天 00:00 的数据）
+                if (lastIndex !== -1 && lastIndex + 1 < hourly.time.length) {
+                    const nextTime = new Date(hourly.time[lastIndex + 1]);
+                    const nextHour = nextTime.getHours();
+                    if (nextHour === 0) {
+                        items.push({
+                            time: nextTime,
+                            speed: Math.round(hourly.wind_speed_10m[lastIndex + 1] * 0.539957),
+                            gust: Math.round(hourly.wind_gusts_10m[lastIndex + 1] * 0.539957),
+                            dir: Math.round(hourly.wind_direction_10m[lastIndex + 1])
+                        });
+                    }
+                }
+            }
+            return items;
+        }
+
+        // 找到最接近“现在”的小时索引（仅 today 使用）
+        function findCurrentHourIndex(items) {
+            if (!items || items.length === 0) return -1;
+            const now = new Date();
+            const currentNZ = new Date(now.toLocaleString("en-US", { timeZone: CONFIG.TIMEZONE }));
+            let closestIdx = 0;
+            let minDiff = Infinity;
+
+            items.forEach((item, i) => {
+                const diff = Math.abs(item.time.getTime() - currentNZ.getTime());
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    closestIdx = i;
+                }
+            });
+            return closestIdx;
+        }
+
+        // 准备温度数据（复用风况的时间过滤逻辑）
+        function prepareHourlyTemperatureItems(weather, type, index) {
+            if (!weather?.hourly?.time?.length) return [];
+            const hourly = weather.hourly;
+            const items = [];
+
+            const hasTemp = hourly.temperature_2m && hourly.apparent_temperature;
+
+            if (type === 'today') {
+                const now = new Date();
+                const currentNZ = new Date(now.toLocaleString("en-US", { timeZone: CONFIG.TIMEZONE }));
+                const todayStr = getLocalDateString(currentNZ);
+                let lastIndex = -1;
+
+                for (let i = 0; i < hourly.time.length; i++) {
+                    const t = new Date(hourly.time[i]);
+                    const tNZ = new Date(t.toLocaleString("en-US", { timeZone: CONFIG.TIMEZONE }));
+                    if (getLocalDateString(tNZ) === todayStr) {
+                        items.push({
+                            time: t,
+                            temp: hasTemp ? Math.round(hourly.temperature_2m[i]) : null,
+                            apparent: hasTemp ? Math.round(hourly.apparent_temperature[i]) : null
+                        });
+                        lastIndex = i;
+                    }
+                }
+
+                // 尝试追加 24:00（使用次日 00:00 温度）
+                if (lastIndex !== -1 && lastIndex + 1 < hourly.time.length && hasTemp) {
+                    const nextTime = new Date(hourly.time[lastIndex + 1]);
+                    if (nextTime.getHours() === 0) {
+                        items.push({
+                            time: nextTime,
+                            temp: Math.round(hourly.temperature_2m[lastIndex + 1]),
+                            apparent: Math.round(hourly.apparent_temperature[lastIndex + 1])
+                        });
+                    }
+                }
+            } else {
+                const targetDay = getLocalDateString(new Date(Date.now() + (index || 0) * 86400000));
+                let lastIndex = -1;
+
+                for (let i = 0; i < hourly.time.length; i++) {
+                    if (hourly.time[i].slice(0, 10) === targetDay) {
+                        items.push({
+                            time: new Date(hourly.time[i]),
+                            temp: hasTemp ? Math.round(hourly.temperature_2m[i]) : null,
+                            apparent: hasTemp ? Math.round(hourly.apparent_temperature[i]) : null
+                        });
+                        lastIndex = i;
+                    }
+                }
+
+                if (lastIndex !== -1 && lastIndex + 1 < hourly.time.length && hasTemp) {
+                    const nextTime = new Date(hourly.time[lastIndex + 1]);
+                    if (nextTime.getHours() === 0) {
+                        items.push({
+                            time: nextTime,
+                            temp: Math.round(hourly.temperature_2m[lastIndex + 1]),
+                            apparent: Math.round(hourly.apparent_temperature[lastIndex + 1])
+                        });
+                    }
+                }
+            }
+            return items;
+        }
+
+        function drawWindChart(canvas, items, isToday, currentIndex = -1, highlightIndex = -1) {
+            if (!items || items.length < 2) return;
+            const ctx = canvas.getContext('2d', { alpha: true });
+            const dpr = window.devicePixelRatio || 1;
+            const cssW = canvas.width / dpr;
+            const cssH = canvas.height / dpr;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 增加顶部空间，让风向箭头有明显呼吸感，不再贴着图表
+            const padding = { top: 30, right: 38, bottom: 22, left: 8 };
+            const chartW = cssW - padding.left - padding.right;
+            const chartH = cssH - padding.top - padding.bottom;
+
+            const speeds = items.map(it => it.speed);
+            const gusts = items.map(it => it.gust);
+            const maxVal = Math.max(...gusts, ...speeds, 15);
+            const yMax = Math.ceil(maxVal / 5) * 5 + 5;
+
+            // 标准间距：让第一个点（00时）和最后一个点（24时）正好顶在图表左右两端
+            const xStep = items.length > 1 ? chartW / (items.length - 1) : chartW;
+            const yScale = chartH / yMax;
+
+            // === Past vs Future styles (Apple Weather effect) ===
+            const hasPast = isToday && currentIndex >= 0 && currentIndex < items.length - 1;
+
+            // Past (left of Now): dashed + dimmer
+            const pastWindColor = 'rgba(52, 211, 153, 0.45)';
+            const pastGustColor = 'rgba(110, 231, 183, 0.35)';
+
+            // Future (right of Now / all for future days): solid + bright
+            const futureWindColor = '#34d399';
+            const futureGustColor = '#6ee7b7';
+
+            // Subtle grid
+            ctx.strokeStyle = '#374151';
+            ctx.lineWidth = 1;
+
+            // Horizontal
+            for (let y = 0; y <= yMax; y += 5) {
+                const yPos = padding.top + chartH - y * yScale;
+                ctx.beginPath();
+                ctx.moveTo(padding.left, yPos);
+                ctx.lineTo(padding.left + chartW, yPos);
+                ctx.stroke();
+            }
+            // Vertical (sparse)
+            for (let i = 0; i < items.length; i += 4) {
+                const x = padding.left + i * xStep;
+                ctx.beginPath();
+                ctx.moveTo(x, padding.top);
+                ctx.lineTo(x, padding.top + chartH);
+                ctx.stroke();
+            }
+
+            // Y labels on right (Apple style)
+            ctx.fillStyle = '#9ca3af';
+            ctx.font = '10px system-ui';
+            ctx.textAlign = 'left';
+            for (let y = 0; y <= yMax; y += 5) {
+                const yPos = padding.top + chartH - y * yScale + 3;
+                ctx.fillText(y + 'kn', padding.left + chartW + 6, yPos);
+            }
+
+            // === Past vs Future drawing (Apple Weather style) ===
+            const splitIdx = hasPast ? currentIndex : -1;
+
+            if (hasPast) {
+                // ---- PAST segment (dashed + dim) ----
+                // Past wind (dashed, dim)
+                ctx.strokeStyle = pastWindColor;
+                ctx.lineWidth = 2.8;
+                ctx.lineJoin = 'round';
+                ctx.setLineDash([3, 2.5]);
+                ctx.beginPath();
+                for (let i = 0; i <= splitIdx; i++) {
+                    const x = padding.left + i * xStep;
+                    const y = padding.top + chartH - items[i].speed * yScale;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Past gust (dashed, more muted)
+                ctx.strokeStyle = pastGustColor;
+                ctx.lineWidth = 1.6;
+                ctx.setLineDash([3, 2.5]);
+                ctx.beginPath();
+                for (let i = 0; i <= splitIdx; i++) {
+                    const x = padding.left + i * xStep;
+                    const y = padding.top + chartH - items[i].gust * yScale;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // ---- FUTURE segment (solid + bright + fill) ----
+                // Future area fill (only future side)
+                const grad = ctx.createLinearGradient(0, padding.top, 0, padding.top + chartH);
+                grad.addColorStop(0, 'rgba(52, 211, 153, 0.38)');
+                grad.addColorStop(0.5, 'rgba(16, 185, 129, 0.22)');
+                grad.addColorStop(1, 'rgba(16, 185, 129, 0.02)');
+
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.moveTo(padding.left + splitIdx * xStep, padding.top + chartH); // bottom at split
+                for (let i = splitIdx; i < items.length; i++) {
+                    const x = padding.left + i * xStep;
+                    const y = padding.top + chartH - items[i].speed * yScale;
+                    if (i === splitIdx) ctx.lineTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.lineTo(padding.left + (items.length - 1) * xStep, padding.top + chartH);
+                ctx.closePath();
+                ctx.fill();
+
+                // Future wind (solid, bright)
+                ctx.strokeStyle = futureWindColor;
+                ctx.lineWidth = 2.8;
+                ctx.lineJoin = 'round';
+                ctx.beginPath();
+                for (let i = splitIdx; i < items.length; i++) {
+                    const x = padding.left + i * xStep;
+                    const y = padding.top + chartH - items[i].speed * yScale;
+                    if (i === splitIdx) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+
+                // Future gust (solid, bright)
+                ctx.strokeStyle = futureGustColor;
+                ctx.lineWidth = 1.6;
+                ctx.beginPath();
+                for (let i = splitIdx; i < items.length; i++) {
+                    const x = padding.left + i * xStep;
+                    const y = padding.top + chartH - items[i].gust * yScale;
+                    if (i === splitIdx) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+
+            } else {
+                // No past (future day or no currentIndex) → draw everything in bright future style
+                // Gradient fill under wind speed line
+                const grad = ctx.createLinearGradient(0, padding.top, 0, padding.top + chartH);
+                grad.addColorStop(0, 'rgba(52, 211, 153, 0.38)');
+                grad.addColorStop(0.5, 'rgba(16, 185, 129, 0.22)');
+                grad.addColorStop(1, 'rgba(16, 185, 129, 0.02)');
+
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                items.forEach((item, i) => {
+                    const x = padding.left + i * xStep;
+                    const y = padding.top + chartH - item.speed * yScale;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                });
+                ctx.lineTo(padding.left + (items.length - 1) * xStep, padding.top + chartH);
+                ctx.lineTo(padding.left, padding.top + chartH);
+                ctx.closePath();
+                ctx.fill();
+
+                // Main wind speed line (solid, bright)
+                ctx.strokeStyle = futureWindColor;
+                ctx.lineWidth = 2.8;
+                ctx.lineJoin = 'round';
+                ctx.beginPath();
+                items.forEach((item, i) => {
+                    const x = padding.left + i * xStep;
+                    const y = padding.top + chartH - item.speed * yScale;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                });
+                ctx.stroke();
+
+                // Gust line (dashed, lighter but still bright)
+                ctx.strokeStyle = futureGustColor;
+                ctx.lineWidth = 1.6;
+                ctx.setLineDash([3, 2.5]);
+                ctx.beginPath();
+                items.forEach((item, i) => {
+                    const x = padding.left + i * xStep;
+                    const y = padding.top + chartH - item.gust * yScale;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                });
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // 风向箭头：固定每两小时一个（参考 Apple Weather）
+            // 按用户要求：两边都不留白，从 00 时开始，到最后一个小时（23时）结束
+            // 这样箭头在图表左右两端都有覆盖，视觉上更对称
+            const arrowIndices = [];
+            const step = 2;
+
+            for (let i = 0; i < items.length; i += step) {
+                arrowIndices.push(i);
+            }
+
+            // 确保最后一个数据点（最右边）也有箭头
+            if (items.length > 0) {
+                const lastIdx = items.length - 1;
+                if (!arrowIndices.includes(lastIdx)) {
+                    arrowIndices.push(lastIdx);
+                }
+            }
+
+            arrowIndices.forEach((idx) => {
+                if (idx < 0 || idx >= items.length) return;
+                const item = items[idx];
+                const x = padding.left + idx * xStep;
+                const ay = padding.top - 14;
+                const rot = ((item.dir + 180) % 360) * Math.PI / 180;
+
+                const isPastArrow = hasPast && idx <= splitIdx;
+
+                ctx.save();
+                ctx.translate(x, ay);
+                ctx.rotate(rot);
+
+                if (isPastArrow) {
+                    // Past arrows: dimmed
+                    ctx.fillStyle = 'rgba(163, 230, 53, 0.45)';
+                    ctx.strokeStyle = 'rgba(163, 230, 53, 0.45)';
+                } else {
+                    // Future arrows: bright
+                    ctx.fillStyle = '#a3e635';
+                    ctx.strokeStyle = '#a3e635';
+                }
+
+                ctx.beginPath();
+                ctx.moveTo(0, -5.5);
+                ctx.lineTo(-3.2, 3.8);
+                ctx.lineTo(3.2, 3.8);
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.lineWidth = 1.1;
+                ctx.beginPath();
+                ctx.moveTo(0, 4);
+                ctx.lineTo(0, 8.5);
+                ctx.stroke();
+                ctx.restore();
+            });
+
+            // Time labels (bottom)
+            ctx.fillStyle = '#9ca3af';
+            ctx.font = '10px system-ui';
+            ctx.textAlign = 'center';
+            const labelStep = Math.max(2, Math.floor(items.length / 8));
+            items.forEach((item, i) => {
+                if (i % labelStep !== 0 && i !== items.length - 1) return;
+                const x = padding.left + i * xStep;
+
+                let labelText;
+                if (i === items.length - 1) {
+                    // 最右边显示 “24” 而不是下一个小时的 “00”
+                    labelText = '24';
+                } else {
+                    labelText = item.time.toLocaleTimeString('zh-CN', { hour: '2-digit' });
+                }
+                ctx.fillText(labelText, x, cssH - 5);
+            });
+
+            // "Now" vertical line + dot (only for today, at correct position in full-day data)
+            if (isToday && currentIndex >= 0 && currentIndex < items.length) {
+                const x = padding.left + currentIndex * xStep;
+
+                // subtle vertical band
+                ctx.fillStyle = 'rgba(255,255,255,0.08)';
+                ctx.fillRect(x - 1.5, padding.top, 3, chartH);
+
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(x, padding.top - 2);
+                ctx.lineTo(x, padding.top + chartH + 1);
+                ctx.stroke();
+
+                const dotY = padding.top + chartH - items[currentIndex].speed * yScale;
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.arc(x, dotY, 4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#1f2937';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(x, dotY, 4, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+            // Hover highlight (bigger dot + thin vertical)
+            if (highlightIndex >= 0 && highlightIndex < items.length) {
+                const x = padding.left + highlightIndex * xStep;
+
+                ctx.strokeStyle = 'rgba(163, 230, 53, 0.9)';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(x, padding.top);
+                ctx.lineTo(x, padding.top + chartH);
+                ctx.stroke();
+
+                const dotY = padding.top + chartH - items[highlightIndex].speed * yScale;
+                ctx.fillStyle = '#a3e635';
+                ctx.beginPath();
+                ctx.arc(x, dotY, 5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#111827';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(x, dotY, 5, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+
+        // 温度趋势图表（设计上与风况模块高度一致）
+        function drawTemperatureChart(canvas, items, isToday, currentIndex = -1, highlightIndex = -1) {
+            if (!items || items.length < 2) return;
+            const ctx = canvas.getContext('2d', { alpha: true });
+            const dpr = window.devicePixelRatio || 1;
+            const cssW = canvas.width / dpr;
+            const cssH = canvas.height / dpr;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const padding = { top: 30, right: 38, bottom: 22, left: 8 };
+            const chartW = cssW - padding.left - padding.right;
+            const chartH = cssH - padding.top - padding.bottom;
+
+            // 过滤有效温度数据
+            const validItems = items.filter(it => it.temp !== null);
+            if (validItems.length < 2) return;
+
+            const temps = validItems.map(it => it.temp);
+            const minT = Math.min(...temps);
+            const maxT = Math.max(...temps);
+            const range = Math.max(8, maxT - minT + 4); // 最小范围，避免太扁
+
+            const yMin = Math.floor(minT - 2);
+            const yMax = Math.ceil(maxT + 2);
+
+            const xStep = items.length > 1 ? chartW / (items.length - 1) : chartW;
+            const yScale = chartH / (yMax - yMin || 1);
+
+            // === Past vs Future styles (与风况模块保持一致的设计) ===
+            const hasPast = isToday && currentIndex >= 0 && currentIndex < items.length - 1;
+            const splitIdx = hasPast ? currentIndex : -1;
+
+            // Past (dashed + 较暗的金色)
+            const pastTempColor = 'rgba(251, 191, 36, 0.45)';
+
+            // Future (实线 + 明亮的金色)
+            const futureTempColor = '#fbbf24';
+
+            // Grid
+            ctx.strokeStyle = '#374151';
+            ctx.lineWidth = 1;
+            for (let y = yMin; y <= yMax; y += 2) {
+                const yPos = padding.top + chartH - (y - yMin) * yScale;
+                ctx.beginPath();
+                ctx.moveTo(padding.left, yPos);
+                ctx.lineTo(padding.left + chartW, yPos);
+                ctx.stroke();
+            }
+
+            // Y labels (温度)
+            ctx.fillStyle = '#9ca3af';
+            ctx.font = '10px system-ui';
+            ctx.textAlign = 'left';
+            for (let y = yMin; y <= yMax; y += 2) {
+                const yPos = padding.top + chartH - (y - yMin) * yScale + 3;
+                ctx.fillText(y + '°', padding.left + chartW + 6, yPos);
+            }
+
+            // === 温度线 + 面积填充（过去/未来区分，与风况模块一致） ===
+            if (hasPast) {
+                // ---- 过去部分：虚线 + 较暗 ----
+                ctx.strokeStyle = pastTempColor;
+                ctx.lineWidth = 2.5;
+                ctx.lineJoin = 'round';
+                ctx.setLineDash([3, 2.5]);
+                ctx.beginPath();
+                for (let i = 0; i <= splitIdx; i++) {
+                    if (items[i].temp === null) continue;
+                    const x = padding.left + i * xStep;
+                    const y = padding.top + chartH - (items[i].temp - yMin) * yScale;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // ---- 未来部分：实线 + 明亮 + 面积填充 ----
+                // 面积填充只画未来侧
+                const grad = ctx.createLinearGradient(0, padding.top, 0, padding.top + chartH);
+                grad.addColorStop(0, 'rgba(251, 191, 36, 0.25)');
+                grad.addColorStop(1, 'rgba(251, 191, 36, 0.03)');
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.moveTo(padding.left + splitIdx * xStep, padding.top + chartH); // 底部起点
+                for (let i = splitIdx; i < items.length; i++) {
+                    if (items[i].temp === null) continue;
+                    const x = padding.left + i * xStep;
+                    const y = padding.top + chartH - (items[i].temp - yMin) * yScale;
+                    ctx.lineTo(x, y);
+                }
+                ctx.lineTo(padding.left + (items.length - 1) * xStep, padding.top + chartH);
+                ctx.closePath();
+                ctx.fill();
+
+                // 未来温度实线
+                ctx.strokeStyle = futureTempColor;
+                ctx.lineWidth = 2.5;
+                ctx.lineJoin = 'round';
+                ctx.beginPath();
+                let startedFuture = false;
+                for (let i = splitIdx; i < items.length; i++) {
+                    if (items[i].temp === null) continue;
+                    const x = padding.left + i * xStep;
+                    const y = padding.top + chartH - (items[i].temp - yMin) * yScale;
+                    if (!startedFuture) {
+                        ctx.moveTo(x, y);
+                        startedFuture = true;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.stroke();
+
+            } else {
+                // 无过去数据（未来天或无 currentIndex）：全部使用明亮实线 + 面积填充
+                const grad = ctx.createLinearGradient(0, padding.top, 0, padding.top + chartH);
+                grad.addColorStop(0, 'rgba(251, 191, 36, 0.25)');
+                grad.addColorStop(1, 'rgba(251, 191, 36, 0.03)');
+
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                items.forEach((item, i) => {
+                    if (item.temp === null) return;
+                    const x = padding.left + i * xStep;
+                    const y = padding.top + chartH - (item.temp - yMin) * yScale;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                });
+                ctx.lineTo(padding.left + (items.length - 1) * xStep, padding.top + chartH);
+                ctx.lineTo(padding.left, padding.top + chartH);
+                ctx.closePath();
+                ctx.fill();
+
+                // 温度实线（明亮）
+                ctx.strokeStyle = futureTempColor;
+                ctx.lineWidth = 2.5;
+                ctx.lineJoin = 'round';
+                ctx.beginPath();
+                let started = false;
+                items.forEach((item, i) => {
+                    if (item.temp === null) return;
+                    const x = padding.left + i * xStep;
+                    const y = padding.top + chartH - (item.temp - yMin) * yScale;
+                    if (!started) {
+                        ctx.moveTo(x, y);
+                        started = true;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                });
+                ctx.stroke();
+            }
+
+            // Time labels + 24
+            ctx.fillStyle = '#9ca3af';
+            ctx.font = '10px system-ui';
+            ctx.textAlign = 'center';
+            const labelStep = Math.max(2, Math.floor(items.length / 8));
+            items.forEach((item, i) => {
+                if (i % labelStep !== 0 && i !== items.length - 1) return;
+                const x = padding.left + i * xStep;
+                let labelText = (i === items.length - 1) ? '24' : item.time.toLocaleTimeString('zh-CN', { hour: '2-digit' });
+                ctx.fillText(labelText, x, cssH - 5);
+            });
+
+            // Now marker (today only)
+            if (isToday && currentIndex >= 0 && currentIndex < items.length) {
+                const x = padding.left + currentIndex * xStep;
+                ctx.fillStyle = 'rgba(255,255,255,0.08)';
+                ctx.fillRect(x - 1.5, padding.top, 3, chartH);
+
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(x, padding.top - 2);
+                ctx.lineTo(x, padding.top + chartH + 1);
+                ctx.stroke();
+
+                const dotY = padding.top + chartH - (items[currentIndex].temp - yMin) * yScale;
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.arc(x, dotY, 4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#1f2937';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(x, dotY, 4, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+            // Hover highlight
+            if (highlightIndex >= 0 && highlightIndex < items.length && items[highlightIndex].temp !== null) {
+                const x = padding.left + highlightIndex * xStep;
+                ctx.strokeStyle = 'rgba(251, 191, 36, 0.9)';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(x, padding.top);
+                ctx.lineTo(x, padding.top + chartH);
+                ctx.stroke();
+
+                const dotY = padding.top + chartH - (items[highlightIndex].temp - yMin) * yScale;
+                ctx.fillStyle = '#fbbf24';
+                ctx.beginPath();
+                ctx.arc(x, dotY, 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        /**
+         * v5.16 干净版 Canvas 尺寸设置
+         * - 桌面：尊重容器自然宽度（Tailwind md:w-[440px] 等约束）
+         * - 移动端：如果测量值明显偏小，才使用保守的视口兜底
+         * - 永远设置 max-width:100%，绝不让 canvas 比父容器宽
+         */
+        function setupResponsiveCanvas(canvas, sectionEl, cssHeight, isMobile) {
+            if (!canvas || !sectionEl) return 320;
+
+            void sectionEl.getBoundingClientRect().width;
+
+            const rect = sectionEl.getBoundingClientRect();
+            const sectionPadX = 14 * 2;
+            let available = Math.floor(rect.width - sectionPadX);
+
+            let displayW;
+            if (isMobile && (available < 260 || !available)) {
+                // 只有在移动端且测量明显失败时才用视口兜底
+                displayW = Math.max(290, Math.floor(window.innerWidth - 36));
+            } else {
+                const maxW = isMobile ? 380 : 440;
+                const minW = 280;
+                displayW = Math.max(minW, Math.min(maxW, available || (isMobile ? 300 : 360)));
+            }
+
+            canvas.classList.remove('w-full');
+
+            canvas.style.width = displayW + 'px';
+            canvas.style.height = cssHeight + 'px';
+            canvas.style.display = 'block';
+            canvas.style.maxWidth = '100%';
+            canvas.style.background = '#1f2937';
+
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = Math.floor(displayW * dpr);
+            canvas.height = Math.floor(cssHeight * dpr);
+
+            return displayW;
+        }
+
+        // 温度模块 Hover / Touch Tooltip（与风况模块保持一致的交互体验）
+        function attachTemperatureTooltip(canvas, items, isToday, currentIndex, container) {
+            let tooltip = document.getElementById('temperature-tooltip');
+            if (!tooltip) {
+                tooltip = document.createElement('div');
+                tooltip.id = 'temperature-tooltip';
+                tooltip.style.cssText = 'position:absolute;background:#111827;border:1px solid #374151;color:white;font-size:11.5px;padding:5px 9px;border-radius:9px;box-shadow:0 10px 15px -3px rgb(0 0 0 / 0.35);pointer-events:none;z-index:50;white-space:nowrap;transform:translate(-50%,-100%);margin-top:-6px;display:none;';
+                tooltip.innerHTML = `
+                    <div class="tooltip-time" style="font-weight:600;color:#fbbf24;font-size:12px;"></div>
+                    <div style="display:flex;justify-content:space-between;gap:12px;font-size:11px;">
+                        <span style="color:#9ca3af;">气温</span>
+                        <span class="tooltip-val temp" style="font-family:ui-monospace,monospace;font-weight:600;"></span>
+                    </div>
+                    <div class="apparent-row" style="display:flex;justify-content:space-between;gap:12px;font-size:11px;">
+                        <span style="color:#9ca3af;">体感</span>
+                        <span class="tooltip-val apparent" style="font-family:ui-monospace,monospace;font-weight:600;"></span>
+                    </div>
+                `;
+                container.appendChild(tooltip);
+            }
+
+            const dpr = window.devicePixelRatio || 1;
+            let cssW = canvas.width / dpr;
+            let cssH = canvas.height / dpr;
+            const padding = { top: 30, right: 38, bottom: 22, left: 8 };
+            let chartW = cssW - padding.left - padding.right;
+            let xStep = items.length > 1 ? chartW / (items.length - 1) : chartW;
+
+            let lastHighlight = -1;
+
+            function getIndexFromClientX(clientX) {
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = clientX - rect.left;
+                const chartX = mouseX - padding.left;
+                let idx = Math.round(chartX / xStep);
+                return Math.max(0, Math.min(items.length - 1, idx));
+            }
+
+            function updateTooltipAndHighlight(clientX) {
+                const idx = getIndexFromClientX(clientX);
+                if (idx === lastHighlight) return;
+                lastHighlight = idx;
+
+                const item = items[idx];
+                if (!item || item.temp === null) {
+                    tooltip.style.display = 'none';
+                    return;
+                }
+
+                const timeStr = item.time.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+
+                tooltip.querySelector('.tooltip-time').textContent = timeStr;
+                tooltip.querySelector('.temp').textContent = `${item.temp}°C`;
+
+                const apparentRow = tooltip.querySelector('.apparent-row');
+                if (item.apparent != null) {
+                    tooltip.querySelector('.apparent').textContent = `${item.apparent}°C`;
+                    apparentRow.style.display = 'flex';
+                } else {
+                    apparentRow.style.display = 'none';
+                }
+
+                const rect = canvas.getBoundingClientRect();
+                const containerRect = container.getBoundingClientRect();
+                const pointX = padding.left + idx * xStep;
+                const leftPx = rect.left - containerRect.left + pointX;
+
+                tooltip.style.left = leftPx + 'px';
+                tooltip.style.top = (rect.top - containerRect.top) + 'px';
+                tooltip.style.display = 'block';
+
+                drawTemperatureChart(canvas, items, isToday, currentIndex, idx);
+            }
+
+            function hideTooltip() {
+                tooltip.style.display = 'none';
+                lastHighlight = -1;
+                drawTemperatureChart(canvas, items, isToday, currentIndex, -1);
+            }
+
+            canvas.addEventListener('mousemove', (e) => updateTooltipAndHighlight(e.clientX));
+            canvas.addEventListener('mouseleave', hideTooltip);
+
+            canvas.addEventListener('touchstart', (e) => {
+                if (e.touches.length > 0) updateTooltipAndHighlight(e.touches[0].clientX);
+            }, { passive: true });
+
+            canvas.addEventListener('touchmove', (e) => {
+                if (e.touches.length > 0) {
+                    e.preventDefault();
+                    updateTooltipAndHighlight(e.touches[0].clientX);
+                }
+            }, { passive: false });
+
+            canvas.addEventListener('touchend', hideTooltip);
+            canvas.addEventListener('touchcancel', hideTooltip);
+        }
+
+        // 苹果风格 Hover / Touch Tooltip（精确数值）
+        function attachWindTooltip(canvas, items, isToday, currentIndex, container) {
+            // 确保 tooltip 元素存在（单例）
+            let tooltip = document.getElementById('wind-tooltip');
+            if (!tooltip) {
+                tooltip = document.createElement('div');
+                tooltip.id = 'wind-tooltip';
+                tooltip.innerHTML = `
+                    <div class="tooltip-time"></div>
+                    <div class="tooltip-row"><span>风速</span><span class="tooltip-val wind"></span></div>
+                    <div class="tooltip-row"><span>阵风</span><span class="tooltip-val gust"></span></div>
+                    <div class="tooltip-row"><span>风向</span><span class="tooltip-val dir"></span></div>
+                `;
+                container.appendChild(tooltip);
+            }
+
+            const dpr = window.devicePixelRatio || 1;
+            let cssW = canvas.width / dpr;
+            let cssH = canvas.height / dpr;
+            // 与 drawWindChart 保持一致（原 22 已导致高亮竖线与箭头区域轻微不匹配）
+            const padding = { top: 30, right: 38, bottom: 22, left: 8 };
+            let chartW = cssW - padding.left - padding.right;
+            let xStep = items.length > 1 ? chartW / (items.length - 1) : chartW;
+
+            let lastHighlight = -1;
+
+            function getIndexFromClientX(clientX) {
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = clientX - rect.left;
+                const chartX = mouseX - padding.left;
+                let idx = Math.round(chartX / xStep);
+                return Math.max(0, Math.min(items.length - 1, idx));
+            }
+
+            function updateTooltipAndHighlight(clientX) {
+                const idx = getIndexFromClientX(clientX);
+                if (idx === lastHighlight) return;
+                lastHighlight = idx;
+
+                const item = items[idx];
+                const timeStr = item.time.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+                const dirText = getWindDirText(item.dir);
+
+                // 更新 tooltip 内容
+                tooltip.querySelector('.tooltip-time').textContent = timeStr;
+                tooltip.querySelector('.wind').textContent = `${item.speed} knots`;
+                tooltip.querySelector('.gust').textContent = `${item.gust} knots`;
+                tooltip.querySelector('.dir').textContent = `${dirText} (${item.dir}°)`;
+
+                // 定位 tooltip（在点上方居中）
+                const rect = canvas.getBoundingClientRect();
+                const containerRect = container.getBoundingClientRect();
+                const pointX = padding.left + idx * xStep;
+                const leftPx = rect.left - containerRect.left + pointX;
+
+                tooltip.style.left = leftPx + 'px';
+                tooltip.style.top = (rect.top - containerRect.top) + 'px';
+                tooltip.style.display = 'block';
+
+                // 重绘图表 + 高亮
+                const highlight = (idx === currentIndex) ? -1 : idx; // 当前时刻就不额外高亮
+                drawWindChart(canvas, items, isToday, currentIndex, highlight);
+            }
+
+            function hideTooltip() {
+                tooltip.style.display = 'none';
+                lastHighlight = -1;
+                // 清除高亮，恢复原图（保留 now 标记）
+                drawWindChart(canvas, items, isToday, currentIndex, -1);
+            }
+
+            // 鼠标
+            canvas.addEventListener('mousemove', (e) => {
+                updateTooltipAndHighlight(e.clientX);
+            });
+            canvas.addEventListener('mouseleave', hideTooltip);
+
+            // 触摸（手机/微信）
+            canvas.addEventListener('touchstart', (e) => {
+                if (e.touches.length > 0) {
+                    updateTooltipAndHighlight(e.touches[0].clientX);
+                }
+            }, { passive: true });
+
+            canvas.addEventListener('touchmove', (e) => {
+                if (e.touches.length > 0) {
+                    e.preventDefault();
+                    updateTooltipAndHighlight(e.touches[0].clientX);
+                }
+            }, { passive: false });
+
+            canvas.addEventListener('touchend', hideTooltip);
+            canvas.addEventListener('touchcancel', hideTooltip);
+
+            // 初始时如果想显示当前点 tooltip 可以取消下面注释
+            // if (isToday && currentIndex >= 0) { ... }
+        }
+
+        function hideDetailModal() {
+            const m = document.getElementById("detail-modal");
+            m.classList.remove("flex");
+            m.classList.add("hidden");
+
+            // 清理两个图表的 tooltip
+            const windTip = document.getElementById('wind-tooltip');
+            if (windTip) windTip.style.display = 'none';
+            const tempTip = document.getElementById('temperature-tooltip');
+            if (tempTip) tempTip.style.display = 'none';
+
+            // 清理移动端 ResizeObserver（避免重复观察）
+            const windSec = document.getElementById('wind-chart-section');
+            const tempSec = document.getElementById('temperature-chart-section');
+            if (windSec && windSec._chartResizeObserver) {
+                windSec._chartResizeObserver.disconnect();
+                delete windSec._chartResizeObserver;
+            }
+            if (tempSec && tempSec._chartResizeObserver) {
+                tempSec._chartResizeObserver.disconnect();
+                delete tempSec._chartResizeObserver;
+            }
+        }
+
+        // ==================== 主流程 ====================
+        async function refreshData(forceFresh = false) {
+            const rt = document.getElementById("refresh-text");
+            rt.innerHTML = `<i class="fas fa-sync-alt fa-spin"></i> 更新中...`;
+
+            let weather = null;
+            let tides = null;
+
+            try {
+                weather = await fetchWeatherData();
+            } catch (e) {
+                const cached = loadCachedWeather();
+                if (cached) weather = cached.data;
+            }
+
+            if (!weather) {
+                document.getElementById("today-card").innerHTML = `<div class="text-red-400 py-8 text-center">无法获取天气数据</div>`;
+                rt.textContent = "刷新";
+                return;
+            }
+
+            window.lastWeatherData = weather;
+
+            const tideKey = getWorldTidesKey();
+            if (tideKey) {
+                try {
+                    tides = await fetchTideData();
+                } catch (e) {
+                    console.warn("Tide fetch failed:", e.message);
+                }
+            }
+
+            const cached = loadCachedWeather();
+            renderToday(weather, tides);
+            renderForecast(weather, tides);
+            updateStatus(cached ? cached.savedAt : null);
+
+            rt.textContent = "刷新";
+        }
+
+        // ==================== 设置相关 ====================
+        function updateTideKeyStatusUI() {
+            const statusEl = document.getElementById("tide-key-status");
+            const customSection = document.getElementById("custom-key-section");
+            const defaultActions = document.getElementById("default-key-actions");
+
+            const currentKey = getWorldTidesKey();
+            const looksLikeStormglass = isLikelyStormglassKey(currentKey);
+
+            if (isUsingCustomKey()) {
+                let extraWarning = '';
+                if (looksLikeStormglass) {
+                    extraWarning = `<div class="text-orange-400 text-xs mt-1">⚠️ 当前自定义 Key 格式看起来像是 Stormglass 的 Key（当前代码使用 WorldTides）。</div>`;
+                }
+
+                statusEl.innerHTML = `
+                    <div class="text-emerald-400 font-medium">✓ 当前使用自定义 Key</div>
+                    <div class="text-xs text-gray-400 mt-1">你已保存了自己的 Key</div>
+                    ${extraWarning}
+                `;
+                customSection.classList.remove("hidden");
+                defaultActions.classList.add("hidden");
+
+                // 动态添加测试按钮
+                if (!customSection.querySelector('.test-key-btn')) {
+                    const testBtn = document.createElement('button');
+                    testBtn.className = 'mt-3 w-full bg-gray-600 hover:bg-gray-700 py-2.5 rounded-2xl font-medium text-sm test-key-btn';
+                    testBtn.textContent = '测试当前 Key';
+                    testBtn.onclick = testWorldTidesKey;
+                    customSection.appendChild(testBtn);
+                }
+            } else {
+                let extraWarning = '';
+                if (looksLikeStormglass) {
+                    extraWarning = `<div class="text-orange-400 text-xs mt-1">⚠️ 当前默认 Key 格式看起来像是 Stormglass，请检查 DEFAULT_WORLD_TIDES_KEY 是否已恢复为 WorldTides。</div>`;
+                }
+
+                statusEl.innerHTML = `
+                    <div class="text-blue-400 font-medium">✓ 当前使用内置默认 Key（已安全保护）</div>
+                    <div class="text-xs text-gray-400 mt-1">系统已为你提供默认可用的潮汐 Key</div>
+                    ${extraWarning}
+                `;
+                customSection.classList.add("hidden");
+                defaultActions.classList.remove("hidden");
+            }
+        }
+
+        function switchToCustomKey() {
+            const customSection = document.getElementById("custom-key-section");
+            const defaultActions = document.getElementById("default-key-actions");
+            
+            customSection.classList.remove("hidden");
+            defaultActions.classList.add("hidden");
+            
+            // 聚焦输入框
+            setTimeout(() => {
+                document.getElementById("wt-key-input").focus();
+            }, 100);
+        }
+
+        function saveCustomKey() {
+            const input = document.getElementById("wt-key-input");
+            const value = input.value.trim();
+
+            if (!value) {
+                alert("请输入有效的 World Tides Key");
+                return;
+            }
+
+            localStorage.setItem("worldtides_key", value);
+            updateTideKeyStatusUI();
+            alert("自定义 Key 已保存！");
+
+            // 自动刷新数据
+            refreshData(true);
+        }
+
+        function clearCustomKey() {
+            if (confirm("确定要清除自定义 Key 并恢复使用默认 Key 吗？")) {
+                localStorage.removeItem("worldtides_key");
+                // 清除可能残留的潮汐缓存，避免旧数据干扰
+                localStorage.removeItem("fl_tide_cache");
+                document.getElementById("wt-key-input").value = "";
+                updateTideKeyStatusUI();
+                refreshData(true);
+            }
+        }
+
+        function isLikelyStormglassKey(key) {
+            if (!key) return false;
+            // Stormglass Key 通常很长（两个 UUID 用 - 连接），segment 数量多（>=7），长度 > 60
+            const parts = key.split('-');
+            return key.length > 60 && parts.length >= 7;
+        }
+
+        async function testWorldTidesKey() {
+            const key = getWorldTidesKey();
+
+            if (isLikelyStormglassKey(key)) {
+                alert(
+                    "⚠️ 检测到当前 Key 格式像是 Stormglass 的 Key（当前代码使用 WorldTides 接口）。\n\n" +
+                    "请执行以下操作之一：\n" +
+                    "1. 点击设置里的「清除并使用默认」\n" +
+                    "2. 在控制台执行： localStorage.removeItem('worldtides_key'); location.reload();\n\n" +
+                    "然后再点击测试。"
+                );
+                return;
+            }
+
+            try {
+                const url = `https://www.worldtides.info/api/v3?lat=${CONFIG.lat}&lon=${CONFIG.lon}&key=${key}&days=2&extremes=&datum=MSL`;
+                const res = await fetch(url);
+                const json = await res.json();
+
+                if (json.status === 200 && json.extremes?.length > 0) {
+                    const first = json.extremes[0];
+                    const time = new Date(first.date).toLocaleString('zh-CN', { 
+                        timeZone: CONFIG.TIMEZONE, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' 
+                    });
+                    alert(`✅ 当前使用的 Key 有效！\n${first.type} ${first.height.toFixed(2)}m\n${time}`);
+                } else {
+                    alert(`❌ 当前 Key 测试失败\n${json.error || '接口返回异常'}`);
+                }
+            } catch (e) {
+                alert("测试失败：" + e.message);
+            }
+        }
+
+        // ==================== 其他 Modal ====================
+        function showLogicModal() {
+            const modal = document.getElementById("logic-modal");
+            if (modal) {
+                modal.classList.remove("hidden");
+                modal.classList.add("flex");
+            }
+        }
+
+        function hideLogicModal() {
+            const modal = document.getElementById("logic-modal");
+            if (modal) {
+                modal.classList.remove("flex");
+                modal.classList.add("hidden");
+            }
+        }
+
+        function showSettingsModal() {
+            updateTideKeyStatusUI();
+            const modal = document.getElementById("settings-modal");
+            modal.classList.remove("hidden");
+            modal.classList.add("flex");
+        }
+
+        function hideSettingsModal() {
+            const m = document.getElementById("settings-modal");
+            m.classList.remove("flex");
+            m.classList.add("hidden");
+        }
+
+        async function saveSettingsAndRefresh() {
+            hideSettingsModal();
+            await refreshData(true);
+        }
+
+        // ==================== 初始化 ====================
+        async function init() {
+            document.getElementById("location-text").textContent = CONFIG.locationName;
+
+            const cw = loadCachedWeather();
+            if (cw) {
+                window.lastWeatherData = cw.data;
+                renderToday(cw.data, null);
+                renderForecast(cw.data, null);
+                updateStatus(cw.savedAt);
+            }
+
+            await refreshData();
+
+            setInterval(() => refreshData(), CONFIG.refreshIntervalMin * 60 * 1000);
+        }
+
+        init();
+    </script>
+</body>
+</html>

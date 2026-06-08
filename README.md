@@ -46,13 +46,28 @@ fishing-lights/
 
 - 天气 / 海洋：Open-Meteo（Pacific/Auckland 时区）
 - 潮汐：World Tides v3（/extremes + datum=MSL）
-- 内置安全默认 Key + 支持用户自定义 Key（设置面板）
+
+### 安全架构（推荐部署方式）
+
+从 vNext 开始，默认 World Tides Key **不再硬编码在前端**：
+
+- 默认模式通过 **Netlify Functions 安全代理**调用（真实 Key 只存在 Netlify 环境变量 `WORLD_TIDES_KEY` 中）。
+- 前端源码和 GitHub 上完全看不到 Key。
+- 如果你在设置面板填写了自己的 Key，则走浏览器直连（使用你自己的配额）。
+
+**部署到 Netlify 时必须设置环境变量**：
+1. 在 Netlify Dashboard → Site settings → Environment variables
+2. 添加变量：
+   - Key: `WORLD_TIDES_KEY`
+   - Value: 你的 World Tides API Key（不要 base64，直接原始 key）
+
+这样即使仓库是 public 的，Key 也不会泄露。
 
 ## 部署
 
 - 当前线上地址：https://fishinglights.netlify.app/
-- GitHub Pages：可直接把 `index.html` 设为入口。
-- Netlify / Vercel / GitHub Pages 都只需上传单文件即可。
+- GitHub Pages：可直接把 `index.html` 设为入口（但无法使用安全代理）。
+- **推荐**：使用 Netlify（支持 Functions + 环境变量，最安全）。
 
 ## 开发历史
 
