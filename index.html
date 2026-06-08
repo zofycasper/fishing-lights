@@ -2774,7 +2774,8 @@
                     <div class="text-blue-400 font-medium">✓ 当前使用安全代理模式</div>
                     <div class="text-xs text-gray-400 mt-1">
                         默认 Key 存储在服务器环境变量中，通过后端代理调用。<br>
-                        前端源码和 GitHub 上看不到真实 Key。
+                        前端源码和 GitHub 上看不到真实 Key。<br>
+                        点击下方的「测试当前 Key」会测试代理是否正常工作。
                     </div>
                 `;
                 customSection.classList.add("hidden");
@@ -2831,9 +2832,32 @@
         }
 
         async function testWorldTidesKey() {
-            const key = getWorldTidesKey();
+            const customKey = localStorage.getItem("worldtides_key");
 
-            if (isLikelyStormglassKey(key)) {
+            if (!customKey) {
+                // 默认模式：使用 Netlify Functions 安全代理（Key 只在服务器环境变量中）
+                try {
+                    const url = `/.netlify/functions/tides?lat=${CONFIG.lat}&lon=${CONFIG.lon}&days=2&datum=MSL`;
+                    const res = await fetch(url);
+                    const json = await res.json();
+
+                    if (json.status === 200 && json.extremes?.length > 0) {
+                        const first = json.extremes[0];
+                        const time = new Date(first.date).toLocaleString('zh-CN', { 
+                            timeZone: CONFIG.TIMEZONE, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' 
+                        });
+                        alert(`✅ 当前使用安全代理模式（Key 存储在 Netlify 服务器环境变量中）\n代理测试通过！\n${first.type} ${first.height.toFixed(2)}m\n${time}\n\n你的 APP 正在使用后端代理，Key 不会暴露在前端。`);
+                    } else {
+                        alert(`❌ 代理测试失败\n${json.error || '接口返回异常'}\n\n请确认：\n1. 已在 Netlify 设置 WORLD_TIDES_KEY 环境变量\n2. 已重新部署（Trigger deploy）`);
+                    }
+                } catch (e) {
+                    alert("代理测试失败（本地开发常见）：\n" + e.message + "\n\n提示：本地直接打开 HTML 时请在设置中填入自己的自定义 Key 进行测试。");
+                }
+                return;
+            }
+
+            // 有自定义 Key：测试用户自己的 Key（直连）
+            if (isLikelyStormglassKey(customKey)) {
                 alert(
                     "⚠️ 检测到当前 Key 格式像是 Stormglass 的 Key（当前代码使用 WorldTides 接口）。\n\n" +
                     "请执行以下操作之一：\n" +
@@ -2845,7 +2869,7 @@
             }
 
             try {
-                const url = `https://www.worldtides.info/api/v3?lat=${CONFIG.lat}&lon=${CONFIG.lon}&key=${key}&days=2&extremes=&datum=MSL`;
+                const url = `https://www.worldtides.info/api/v3?lat=${CONFIG.lat}&lon=${CONFIG.lon}&key=${customKey}&days=2&extremes=&datum=MSL`;
                 const res = await fetch(url);
                 const json = await res.json();
 
@@ -2854,9 +2878,9 @@
                     const time = new Date(first.date).toLocaleString('zh-CN', { 
                         timeZone: CONFIG.TIMEZONE, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' 
                     });
-                    alert(`✅ 当前使用的 Key 有效！\n${first.type} ${first.height.toFixed(2)}m\n${time}`);
+                    alert(`✅ 你的自定义 Key 有效！\n${first.type} ${first.height.toFixed(2)}m\n${time}`);
                 } else {
-                    alert(`❌ 当前 Key 测试失败\n${json.error || '接口返回异常'}`);
+                    alert(`❌ 自定义 Key 测试失败\n${json.error || '接口返回异常'}`);
                 }
             } catch (e) {
                 alert("测试失败：" + e.message);
