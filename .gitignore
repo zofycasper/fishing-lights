@@ -1,0 +1,19 @@
+# Secrets and personal files
+api.txt
+*.pdf
+*.docx
+portfolio.txt
+
+# OS generated
+.DS_Store
+Thumbs.db
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Build / temp (if any in future)
+node_modules/
+dist/
