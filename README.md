@@ -1,6 +1,10 @@
-# 🎣 Fishing Lights（北岸钓鱼红绿灯）
+# 🎣 奥克兰钓鱼红绿灯（Auckland Fishing Lights）
 
-Auckland North Shore fishing conditions checker — single-file HTML SPA with strict 3-color light logic.
+奥克兰全区（及未来新西兰全国）钓鱼条件红绿灯预测 — 单文件 HTML SPA，支持严格的三色灯逻辑（轻型/中型路亚）。
+
+**当前覆盖**：奥克兰大区主要钓鱼观测站点（北岸/希比斯库斯海岸、中部港口区、哈拉基湾与岛屿、东部、南部马努考港、西部西海岸）。支持点击定位图标切换，或**自动获取当前位置并选择最近站点**。
+
+后续将逐步扩展到新西兰全国其他地区。
 
 ## 项目结构（整理后）
 
@@ -10,8 +14,10 @@ fishing-lights/
 ├── README.md
 ├── index.html                     # 主入口（推荐直接打开这个）
 ├── fishing_lights_app_v5.12.html  # 当前生产版本（带完整注释和版本历史）
+├── netlify/
+│   └── functions/tides.js         # 安全代理（Key 不暴露前端）
 └── archive/
-    └── previous-versions/         # 所有历史迭代版本（v1 ~ v5.20 等）
+    └── previous-versions/         # 所有历史迭代版本
 ```
 
 ### 为什么这样组织？
@@ -34,6 +40,11 @@ fishing-lights/
   - 🟢 绿灯：轻型路亚 + 中型路亚 都适合
   - 🟡 黄灯：仅推荐中型路亚
   - 🔴 红灯：不推荐出钓
+- **多站点支持**：
+  - 点击顶部定位图标打开站点选择器
+  - 支持按区域分组浏览（北岸、中部、东岸、南岸、西岸、岛屿等）
+  - 搜索站点
+  - **自动获取当前位置 → 自动选择最近的观测站点**
 - **Apple Weather 风格图表**（SVG 实现）：
   - 风况（风速 + 阵风 + 风向箭头，每 2 小时一个，过去/未来区分）
   - 气温（带体感）
